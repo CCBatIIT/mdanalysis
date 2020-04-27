@@ -123,7 +123,6 @@ References
 
 """
 from __future__ import absolute_import
-# from six.moves import zip, range
 
 import numpy as np
 
@@ -135,6 +134,7 @@ from MDAnalysis.analysis.base import AnalysisBase
 from MDAnalysis.lib.distances import calc_bonds, calc_angles, calc_dihedrals
 from MDAnalysis.lib._cutil import make_whole
 
+
 def _sort_atoms_by_mass(atoms, reverse=False):
     r""" Sorts a list of atoms by name and then by index
 
@@ -143,16 +143,16 @@ def _sort_atoms_by_mass(atoms, reverse=False):
     Parameters
     ----------
     ag_o : list of Atoms
-      List to sort
+        List to sort
     reverse : bool
-      Atoms will be in descending order
+        Atoms will be in descending order
 
     Returns
     -------
     ag_n : list of Atoms
-      Sorted list
+        Sorted list
     """
-    return sorted(atoms, key = lambda a:(a.mass, a.index), reverse = reverse)
+    return sorted(atoms, key=lambda a: (a.mass, a.index), reverse=reverse)
 
 
 def _find_torsion(selected_atoms, allowed_atoms):
@@ -164,15 +164,15 @@ def _find_torsion(selected_atoms, allowed_atoms):
     Parameters
     ----------
     selected_atoms : AtomGroup
-      Atoms that have already been selected
+        Atoms that have already been selected
     allowed_atoms : AtomGroup
-      Atoms that are allowed to be part of the torsion angle
+        Atoms that are allowed to be part of the torsion angle
 
     Returns
     -------
     new_torsion : AtomGroup
-      either an AtomGroup that defines the torsion angle or None if a new
-      torsion is not found
+        either an AtomGroup that defines the torsion angle or None if a new
+        torsion is not found
     """
     for a1 in selected_atoms:
         # Loop over new atoms connected to the selected atom
@@ -225,6 +225,8 @@ class BAT(AnalysisBase):
         # Check that the ag contains bonds
         if not hasattr(self._ag, 'bonds'):
             raise AttributeError('AtomGroup has no attribute bonds')
+        if len(self._ag.fragments) > 1:
+            raise ValueError('AtomGroup has more than one molecule')
 
         # Determine the root
         # The initial atom must be a terminal atom
@@ -243,7 +245,7 @@ class BAT(AnalysisBase):
         # bonded to the second atom
         # If there are more than three atoms,
         # then the last atom cannot be a terminal atom.
-        if self._ag.n_atoms!=3:
+        if self._ag.n_atoms != 3:
             third_atom = _sort_atoms_by_mass(\
                 [a for a in second_atom.bonded_atoms \
                 if (a in self._ag) and (a!=initial_atom) \
@@ -294,10 +296,10 @@ class BAT(AnalysisBase):
         # The rotation axis is a normalized vector pointing from atom 0 to 1
         # It is described in two degrees of freedom
         # by the polar angle and azimuth
-        if (self._root.dimensions[:3]==0).any():
-          (p0, p1, p2) = self._root.positions
+        if (self._root.dimensions[:3] == 0).any():
+            (p0, p1, p2) = self._root.positions
         else:
-          (p0, p1, p2) = make_whole(self._root, inplace = False)
+            (p0, p1, p2) = make_whole(self._root, inplace=False)
         v01 = p1 - p0
         v21 = p1 - p2
         # Internal coordinates
@@ -351,17 +353,17 @@ class BAT(AnalysisBase):
         Parameters
         ----------
         bat : np.array
-          an array with dimensions (3N,) array with external then internal
-          degrees of freedom based on the root atoms, followed by the bond,
-          angle, and (proper and improper) torsion coordinates.
+            an array with dimensions (3N,) with external then internal
+            degrees of freedom based on the root atoms, followed by the bond,
+            angle, and (proper and improper) torsion coordinates.
 
         Returns
         -------
         XYZ : np.array
-          an array with dimensions (N,3) with Cartesian coordinates. The first
-          dimension has the same ordering as the AtomGroup used to initialize
-          the class. The molecule will be whole opposed to wrapped around a
-          periodic boundary.
+            an array with dimensions (N,3) with Cartesian coordinates. The first
+            dimension has the same ordering as the AtomGroup used to initialize
+            the class. The molecule will be whole opposed to wrapped around a
+            periodic boundary.
         """
         # Split the bat vector into more convenient variables
         origin = bat[:3]
@@ -437,3 +439,8 @@ class BAT(AnalysisBase):
             XYZ[a0] = p1 + \
               r01*(vu*sn_ang*cs_tor + vp*sn_ang*sn_tor - v21*cs_ang)
         return XYZ
+
+    def getAtomGroup(self):
+        """ Returns the atomgroup
+        """
+        return self._ag

@@ -1,0 +1,243 @@
+# -*- Mode: python; tab-width: 4; indent-tabs-mode:nil; coding:utf-8 -*-
+# vim: tabstop=4 expandtab shiftwidth=4 softtabstop=4
+#
+# MDAnalysis --- https://www.mdanalysis.org
+# Copyright (c) 2006-2017 The MDAnalysis Development Team and contributors
+# (see the file AUTHORS for the full list of names)
+#
+# Released under the GNU Public Licence, v21 or any higher version
+#
+# Please cite your use of MDAnalysis in published work:
+#
+# R. J. Gowers, M. Linke, J. Barnoud, T. J. E. Reddy, M. N. Melo, S. L. Seyler,
+# D. L. Dotson, J. Domanski, S. Buchoux, I. M. Kenney, and O. Beckstein.
+# MDAnalysis: A Python package for the rapid analysis of molecular dynamics
+# simulations. In S. Benthall and S. Rostrup editors, Proceedings of the 15th
+# Python in Science Conference, pages 102-109, Austin, TX, 2016. SciPy.
+# doi: 10.25080/majora-629e541a-00e
+#
+# N. Michaud-Agrawal, E. J. Denning, T. B. Woolf, and O. Beckstein.
+# MDAnalysis: A Toolkit for the Analysis of Molecular Dynamics Simulations.
+# J. Comput. Chem. 32 (2011), 2319--2327, doi:10.1002/jcc.21787
+#
+r"""Model for external degrees of freedom --- :mod:`MDAnalysis.analysis.encore.partial_models.external`
+===========================================================================
+
+:Author: David Minh
+:Year: 2020
+:Copyright: GNU Public License, v2 or any higher version
+
+.. versionadded:: N/A
+
+This module contains two classes for modelling external degrees of freedom
+with a nonparameteric density estimate, as described in [Menzer2018]_.
+Translational degrees of freedom are modelled by a Gaussian KDE in principal
+components space. Rotational degrees of freedom are modelled by using a FFT
+to convolute the histogram with a Gaussian kernel.
+
+
+References
+----------
+
+.. [Menzer2018] Menzer, William, Chen Li, Wenji Sun, Bing Xie, and David D L
+   Minh. “Simple Entropy Terms for End-Point Binding Free Energy Calculations.”
+   *Journal of Chemical Theory and Computation* 14: 6035–49.
+   doi:`10.1021/acs.jctc.8b00418<https://doi.org/10.1021/acs.jctc.8b00418>`_
+
+"""
+
+import numpy as np
+from scipy.stats import gaussian_kde
+from scipy.stats import rv_discrete
+
+from MDAnalysis.analysis.encore.partial_models.base import PartialModelBase
+
+
+class Translational(PartialModelBase):
+    """Models translational degrees of freedom
+
+    Translational degrees of freedom are modelled by a Gaussian KDE on a
+    principal components projection. The procedure is described in [Menzer2018]_.
+
+    """
+    def __init__(self, trans):
+        """Parameters
+        ----------
+        trans : np.array
+            The translational degrees of freedom.
+            An array with dimensions (N, 3), where N is the number of samples.
+        """
+
+        # Performs principal components analysis
+        trans_mean = np.mean(trans, 0)
+        trans_c = trans - trans_mean
+        [w, v] = np.linalg.eig(np.dot(trans_c.T, trans_c) / trans_c.shape[0])
+        trans_pca = np.dot(trans_c, v)
+        self._pca = {'mean': trans_mean, 'eigenvalues': w, 'eigenvectors': v}
+
+        # Initiate kernel density estimate instances
+        self._kde = []
+        for dim in range(3):
+            self._kde.append(gaussian_kde(trans_pca[:, dim]))
+
+        # Appropriate intervals to integrate over
+        self._intervals = []
+        for dim in range(3):
+            x_min = min(trans_pca[:, dim])
+            x_max = max(trans_pca[:, dim])
+            tail = (x_max - x_min) * 0.1
+            self._intervals.append((x_min - tail, x_max + tail))
+
+        # Evaluate the log normalizing constant
+        self.lnZ = 0
+        for dim in range(3):
+            self.lnZ += self._kde[dim].integrate_box_1d(\
+                self._intervals[dim][0], self._intervals[dim][1])
+
+        # Standard state correction for confining the system into a box
+        # The standard state volume for a single molecule
+        # in a box of size 1 L is 1.66053928 nanometers**3
+        box = [(self._intervals[dim][1] - self._intervals[dim][0]) \
+            for dim in range(3)]
+        self.DeltaG_xi = np.sum([np.log(box) for dim in range(3)]) - \
+            np.log(1660.53928)
+
+    def rvs(self, N):
+        """Generate random samples
+
+        Parameters
+        ----------
+        N : int
+            number of samples to generate
+
+        Returns
+        -------
+        X : np.array
+            an array of coordinates with dimensions (N, 3), where N is the
+            number of samples
+
+        """
+        trans_pca = np.hstack([kde.resample(N).transpose() \
+            for kde in self._kde])
+        return np.dot(trans_pca, self._pca['eigenvectors']) + \
+            self._pca['mean']
+
+    def logpdf(self, X):
+        """Calculate the log probability density
+
+        Parameters
+        ----------
+        X : np.array
+            an array of coordinates with dimensions (N, 3), where N is the
+            number of samples
+
+        Returns
+        -------
+        logpdf : np.array
+            an array with dimensions (N,), with the log probability density
+
+        """
+        X_c = X - self._pca['mean']
+        X_pca = np.dot(X_c, self._pca['eigenvectors'])
+        return np.sum([self._kde[dim].logpdf(X_pca[:,dim]) \
+            for dim in range(3)], axis = 0)
+
+
+class Rotational(PartialModelBase):
+    """Models rotational degrees of freedom
+
+    Rotational degrees of freedom are modelled by a discretized distribution.
+    The FFT is used to convolute the histogram with a Gaussian kernel.
+    The procedure is described in [Menzer2018]_.
+
+    """
+    def __init__(self, rot, nbins=100):
+        """Parameters
+        ----------
+        rot : np.array
+            The rotational degrees of freedom.
+            An array with dimensions (N, 3), where N is the number of samples.
+        nbins : int
+            The number of bins in the histogram.
+        """
+        edges_2pi = np.linspace(-np.pi, np.pi, nbins)
+        edges_pi = np.linspace(0, np.pi, nbins)
+
+        scotts_factor = np.power(rot.shape[0], (-1. / 5))
+
+        # Define parameters and estimate log partition function
+        self._rv_discrete = []
+        self._edges = []
+        self._centers = []
+        self._delta = []
+
+        self.lnZ = 0
+        for dim in range(3):
+            name = {0: 'phi', 1: 'theta', 2: 'omega'}[dim]
+            if dim in [0, 2]:
+                edges = edges_2pi
+            else:
+                edges = edges_pi
+            delta = edges[1] - edges[0]
+            centers = edges[:-1] + delta / 2
+
+            H = np.histogram(rot[:, dim], edges, density=True)[0]
+            # Gaussian kernel
+            sigma = scotts_factor * 10. * delta
+            ker = np.exp(-(centers-centers[int(len(centers)/2)])**2/\
+                         2/sigma**2)/sigma/np.sqrt(2*np.pi)
+            # Convolution
+            rho = np.abs(np.fft.fftshift(np.fft.ifft(\
+                         np.fft.fft(H)*np.fft.fft(ker))).real)
+            rho /= np.sum(rho)
+            # Initiat discretized random variable
+            rv = rv_discrete(name=name, values=(range(len(rho)), rho))
+
+            if dim in [0, 2]:
+                self.lnZ += np.log(np.sum(rho) * delta)
+            else:
+                # The second Euler angle has a Jacobian
+                self.lnZ += np.log(np.sum(np.sin(centers) * rho) * delta)
+
+            self._rv_discrete.append(rv)
+            self._edges.append(edges)
+            self._centers.append(centers)
+            self._delta.append(delta)
+
+    def rvs(self, N):
+        """Generate random samples
+
+        Parameters
+        ----------
+        N : int
+            number of samples to generate
+
+        Returns
+        -------
+        X : np.array
+            an array of coordinates with dimensions (N, 3), where N is the
+            number of samples
+
+        """
+        samples = [self._centers[dim][self._rv_discrete[dim].rvs(size=N)] \
+            for dim in range(3)]
+        return np.array(samples).transpose()
+
+    def logpdf(self, X):
+        """Calculate the log probability density
+
+        Parameters
+        ----------
+        X : np.array
+            an array of coordinates with dimensions (N, 3), where N is the
+            number of samples
+
+        Returns
+        -------
+        logpdf : np.array
+            an array with dimensions (N,), with the log probability density
+
+        """
+        return np.sum([self._rv_discrete[dim].logpmf(\
+            np.floor((X[:,dim] - self._edges[dim][0])/self._delta[dim])) \
+                for dim in range(3)],0)
