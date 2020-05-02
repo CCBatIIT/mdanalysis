@@ -190,6 +190,11 @@ logger = logging.getLogger(__name__)
 
 
 
+def relative_external(ext1, ext2):
+    r"""
+    """
+
+
 def _sort_atoms_by_mass(atoms, reverse=False):
     r"""Sorts a list of atoms by name and then by index
 
@@ -476,6 +481,25 @@ class BAT(AnalysisBase):
         load: Loads the bat trajectory from a file in numpy binary format
         """
         np.save(filename, self.bat)
+
+    def load_bat(self, FN):
+        """Loads the bat trajectory from a netcdf file
+        """
+        nc_F = Dataset(FN,'r')
+        self.bat = list(np.array(nc_F.variables['bat']))
+        nc_F.close()
+
+    def save_bat(self, FN):
+        """Saves the bat trajectory to a netcdf file
+        """
+        bat = np.array(self.bat)
+
+        nc_F = Dataset(FN,'w')
+        frames = nc_F.createDimension("frames", bat.shape[0])
+        dims = nc_F.createDimension("dims", bat.shape[1])
+        bat_in_F = nc_F.createVariable("bat", "f4", ("frames","dims"))
+        bat_in_F[:] = bat
+        nc_F.close()
 
     def Cartesian(self, bat):
         """Conversion of a single frame from BAT to Cartesian coordinates
