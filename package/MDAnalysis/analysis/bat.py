@@ -23,7 +23,7 @@
 r"""Bond-Angle-Torsion coordinates analysis --- :mod:`MDAnalysis.analysis.bat`
 ===========================================================================
 
-:Author: David Minh
+:Author: Soohaeng Yoo Willow and David Minh
 :Year: 2020
 :Copyright: GNU Public License, v2 or any higher version
 
@@ -35,7 +35,7 @@ for a given set of atoms or residues. This coordinate system is designed
 to be complete, non-redundant, and minimize correlations between degrees
 of freedom. Complete and non-redundant means that for N atoms there will
 be 3N Cartesian coordinates and 3N BAT coordinates. Correlations are
-minimized by using improper torsions [Hikiri2016]_.
+minimized by using improper torsions described in [Hikiri2016]_.
 
 More specifically, bond refers to the bond length, or distance between
 a pair of bonded atoms. Angle refers to the bond angle, the angle between
@@ -125,7 +125,7 @@ References
 from __future__ import absolute_import
 
 import numpy as np
-
+from netCDF4 import Dataset
 import warnings
 
 import MDAnalysis as mda
@@ -135,8 +135,13 @@ from MDAnalysis.lib.distances import calc_bonds, calc_angles, calc_dihedrals
 from MDAnalysis.lib._cutil import make_whole
 
 
+def relative_external(ext1, ext2):
+    r"""
+    """
+
+
 def _sort_atoms_by_mass(atoms, reverse=False):
-    r""" Sorts a list of atoms by name and then by index
+    r"""Sorts a list of atoms by name and then by index
 
     The atom index is used as a tiebreaker so that the ordering is reproducible.
 
@@ -154,38 +159,51 @@ def _sort_atoms_by_mass(atoms, reverse=False):
     """
     return sorted(atoms, key=lambda a: (a.mass, a.index), reverse=reverse)
 
-
-def _find_torsion(selected_atoms, allowed_atoms):
-    """ Finds a torsion angle adjacent to the selected atoms
-
-    The torsion angle includes an atom that is allowed_atoms and is not in
-    selected_atoms.
+def _find_torsions(root, allowed_atoms):
+    """Constructs a list of torsion angles
 
     Parameters
     ----------
-    selected_atoms : AtomGroup
-        Atoms that have already been selected
+    root : AtomGroup
+        First three atoms in the coordinate system
     allowed_atoms : AtomGroup
         Atoms that are allowed to be part of the torsion angle
 
     Returns
     -------
-    new_torsion : AtomGroup
-        either an AtomGroup that defines the torsion angle or None if a new
-        torsion is not found
+    torsions : list of AtomGroup
+        list of AtomGroup that define torsion angles
     """
-    for a1 in selected_atoms:
-        # Loop over new atoms connected to the selected atom
-        for a0 in _sort_atoms_by_mass(a for a in a1.bonded_atoms \
-            if (a in allowed_atoms) and (not a in selected_atoms)):
-            # Find the third atom
-            for a2 in _sort_atoms_by_mass(a for a in a1.bonded_atoms \
-                if (a in allowed_atoms) and (a in selected_atoms) and (a!=a0)):
-                # Find the fourth atom
-                for a3 in _sort_atoms_by_mass(a for a in a2.bonded_atoms \
-                    if (a in allowed_atoms) and (a in selected_atoms) and (a!=a1)):
-                    return mda.AtomGroup([a0, a1, a2, a3])
-    return None
+    torsions = []
+    selected_atoms = list(root)
+    while len(selected_atoms) < len(allowed_atoms):
+        torsionAdded = False
+        for a1 in selected_atoms:
+            # Find a0, which is a new atom connected to the selected atom
+            a0_list = _sort_atoms_by_mass(a for a in a1.bonded_atoms \
+                if (a in allowed_atoms) and (a not in selected_atoms))
+            for a0 in a0_list:
+                # Find a2, which is connected to a1 and has been selected
+                a2_list = _sort_atoms_by_mass(a for a in a1.bonded_atoms \
+                    if (a in allowed_atoms) and (a in selected_atoms))
+                for a2 in a2_list:
+                    # Find a3, which is
+                    # connected to a2, has been selected, and is not a1
+                    a3_list = _sort_atoms_by_mass(a for a in a2.bonded_atoms \
+                        if (a!=a1) and \
+                            (a in allowed_atoms) and (a in selected_atoms))
+                    for a3 in a3_list:
+                        # Add the torsion to the list of torsions
+                        torsions.append(mda.AtomGroup([a0, a1, a2, a3]))
+                        # Add the new atom to selected_atoms
+                        # which extends the loop
+                        selected_atoms.append(a0)
+                        torsionAdded = True
+                        break # out of the a3 loop
+                    break # out of the a2 loop
+        if torsionAdded is False:
+            raise ValueError('Torsion not found.')
+    return torsions
 
 
 class BAT(AnalysisBase):
@@ -195,7 +213,7 @@ class BAT(AnalysisBase):
     in the trajectory belonging to `ag'.`
 
     """
-    def __init__(self, ag, initial_atom=None, **kwargs):
+    def __init__(self, ag, initial_atom=None, bat_nc=None, **kwargs):
         r"""Parameters
         ----------
         ag : AtomGroup or Universe
@@ -210,6 +228,8 @@ class BAT(AnalysisBase):
             The atom whose Cartesian coordinates define the translation
             of the molecule. If not specified, the heaviest terminal atom
             will be selected.
+        bat_nc : str
+            File name of a netCDF4 file containing a saved bat attribute.
 
         Raises
         ------
@@ -259,14 +279,7 @@ class BAT(AnalysisBase):
         self._root = mda.AtomGroup([initial_atom, second_atom, third_atom])
 
         # Construct a list of torsion angles
-        self._torsions = []
-        selected_atoms = mda.AtomGroup(self._root)
-        while len(selected_atoms) < self._ag.n_atoms:
-            torsion = _find_torsion(selected_atoms, self._ag)
-            if torsion is None:
-                raise ValueError('Torsion not found.')
-            self._torsions.append(torsion)
-            selected_atoms += torsion[0]
+        self._torsions = _find_torsions(self._root, self._ag)
 
         # Get indices of the root and torsion atoms
         # in a Cartesian positions array that matches the AtomGroup
@@ -287,6 +300,9 @@ class BAT(AnalysisBase):
         self._ag2 = mda.AtomGroup([ag[1] for ag in self._torsions])
         self._ag3 = mda.AtomGroup([ag[2] for ag in self._torsions])
         self._ag4 = mda.AtomGroup([ag[3] for ag in self._torsions])
+
+        if bat_nc is not None:
+            self.load_bat(bat_nc)
 
     def _prepare(self):
         self.bat = []
@@ -347,8 +363,27 @@ class BAT(AnalysisBase):
 
         self.bat.append(np.concatenate((root_based, bonds, angles, torsions)))
 
+    def load_bat(self, FN):
+        """Loads the bat trajectory from a netcdf file
+        """
+        nc_F = Dataset(FN,'r')
+        self.bat = list(np.array(nc_F.variables['bat']))
+        nc_F.close()
+
+    def save_bat(self, FN):
+        """Saves the bat trajectory to a netcdf file
+        """
+        bat = np.array(self.bat)
+
+        nc_F = Dataset(FN,'w')
+        frames = nc_F.createDimension("frames", bat.shape[0])
+        dims = nc_F.createDimension("dims", bat.shape[1])
+        bat_in_F = nc_F.createVariable("bat", "f4", ("frames","dims"))
+        bat_in_F[:] = bat
+        nc_F.close()
+
     def Cartesian(self, bat):
-        """Conversion from BAT to Cartesian coordinates
+        """Conversion of a single frame from BAT to Cartesian coordinates
 
         Parameters
         ----------
@@ -441,6 +476,6 @@ class BAT(AnalysisBase):
         return XYZ
 
     def getAtomGroup(self):
-        """ Returns the atomgroup
+        """Returns the atomgroup
         """
         return self._ag
