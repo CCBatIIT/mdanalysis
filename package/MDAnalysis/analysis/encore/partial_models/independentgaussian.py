@@ -20,7 +20,7 @@
 # MDAnalysis: A Toolkit for the Analysis of Molecular Dynamics Simulations.
 # J. Comput. Chem. 32 (2011), 2319--2327, doi:10.1002/jcc.21787
 #
-r"""Gaussian partial model --- :mod:`MDAnalysis.analysis.encore.partial_models.gaussian`
+r"""Independent Gaussian partial model --- :mod:`MDAnalysis.analysis.encore.partial_models.independentgaussian`
 ===========================================================================
 
 :Author: David Minh
@@ -29,7 +29,7 @@ r"""Gaussian partial model --- :mod:`MDAnalysis.analysis.encore.partial_models.g
 
 .. versionadded:: N/A
 
-This module contains a class for modelling degrees a subset of the degrees of
+This module contains a class for modelling a subset of the degrees of
 freedom as independent Gaussian distributions.
 
 """
@@ -37,16 +37,16 @@ freedom as independent Gaussian distributions.
 import numpy as np
 tau = 2 * np.pi
 
-from MDAnalysis.analysis.encore.partial_models.base import PartialModelBase
+from .base import PartialModelBase
 
 
-class Gaussian(PartialModelBase):
+class IndependentGaussian(PartialModelBase):
     """Models a subset of the degrees of freedom as independent Gaussians
 
     The mean and standard deviation is based on the sample mean and standard
     deviation. The Jacobian is dependent on whether the degree of freedom is
     a bond, angle, or torsion. It is approximated as a constant, based on
-    the mean value for the degreee of freedom.
+    the mean value for the degree of freedom.
 
     """
     def __init__(self, X, coordinate_type):

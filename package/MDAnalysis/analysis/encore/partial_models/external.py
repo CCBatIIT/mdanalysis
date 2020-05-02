@@ -50,49 +50,24 @@ import numpy as np
 from scipy.stats import gaussian_kde
 from scipy.stats import rv_discrete
 
-from MDAnalysis.analysis.encore.partial_models.base import PartialModelBase
+from .base import PartialModelBase
+from .principalcomponentskde import PrincipalComponentsKDE
 
-
-class Translational(PartialModelBase):
+class Translational(PrincipalComponentsKDE):
     """Models translational degrees of freedom
 
     Translational degrees of freedom are modelled by a Gaussian KDE on a
     principal components projection. The procedure is described in [Menzer2018]_.
 
     """
-    def __init__(self, trans):
+    def __init__(self, X):
         """Parameters
         ----------
-        trans : np.array
+        X : np.array
             The translational degrees of freedom.
             An array with dimensions (N, 3), where N is the number of samples.
         """
-
-        # Performs principal components analysis
-        trans_mean = np.mean(trans, 0)
-        trans_c = trans - trans_mean
-        [w, v] = np.linalg.eig(np.dot(trans_c.T, trans_c) / trans_c.shape[0])
-        trans_pca = np.dot(trans_c, v)
-        self._pca = {'mean': trans_mean, 'eigenvalues': w, 'eigenvectors': v}
-
-        # Initiate kernel density estimate instances
-        self._kde = []
-        for dim in range(3):
-            self._kde.append(gaussian_kde(trans_pca[:, dim]))
-
-        # Appropriate intervals to integrate over
-        self._intervals = []
-        for dim in range(3):
-            x_min = min(trans_pca[:, dim])
-            x_max = max(trans_pca[:, dim])
-            tail = (x_max - x_min) * 0.1
-            self._intervals.append((x_min - tail, x_max + tail))
-
-        # Evaluate the log normalizing constant
-        self.lnZ = 0
-        for dim in range(3):
-            self.lnZ += self._kde[dim].integrate_box_1d(\
-                self._intervals[dim][0], self._intervals[dim][1])
+        super(Translational, self).__init__(X)
 
         # Standard state correction for confining the system into a box
         # The standard state volume for a single molecule
@@ -101,46 +76,6 @@ class Translational(PartialModelBase):
             for dim in range(3)]
         self.DeltaG_xi = np.sum([np.log(box) for dim in range(3)]) - \
             np.log(1660.53928)
-
-    def rvs(self, N):
-        """Generate random samples
-
-        Parameters
-        ----------
-        N : int
-            number of samples to generate
-
-        Returns
-        -------
-        X : np.array
-            an array of coordinates with dimensions (N, 3), where N is the
-            number of samples
-
-        """
-        trans_pca = np.hstack([kde.resample(N).transpose() \
-            for kde in self._kde])
-        return np.dot(trans_pca, self._pca['eigenvectors']) + \
-            self._pca['mean']
-
-    def logpdf(self, X):
-        """Calculate the log probability density
-
-        Parameters
-        ----------
-        X : np.array
-            an array of coordinates with dimensions (N, 3), where N is the
-            number of samples
-
-        Returns
-        -------
-        logpdf : np.array
-            an array with dimensions (N,), with the log probability density
-
-        """
-        X_c = X - self._pca['mean']
-        X_pca = np.dot(X_c, self._pca['eigenvectors'])
-        return np.sum([self._kde[dim].logpdf(X_pca[:,dim]) \
-            for dim in range(3)], axis = 0)
 
 
 class Rotational(PartialModelBase):
@@ -216,7 +151,7 @@ class Rotational(PartialModelBase):
         -------
         X : np.array
             an array of coordinates with dimensions (N, 3), where N is the
-            number of samples
+            number of samples. Samples are at the bin centers.
 
         """
         samples = [self._centers[dim][self._rv_discrete[dim].rvs(size=N)] \
@@ -235,7 +170,8 @@ class Rotational(PartialModelBase):
         Returns
         -------
         logpdf : np.array
-            an array with dimensions (N,), with the log probability density
+            an array with dimensions (N,), with the log probability density.
+            The density is approximated as constant within the bin.
 
         """
         return np.sum([self._rv_discrete[dim].logpmf(\

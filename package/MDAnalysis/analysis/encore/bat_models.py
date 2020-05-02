@@ -30,9 +30,8 @@ r"""BAT Ensemble Models --- :mod:`MDAnalysis.analysis.encore.bat_models`
 .. versionadded:: N/A
 
 This module contains classes that model ensembles based on their
-Bond-Angle-Torsion (BAT) coordinates.
-
-TODO: Write intro to module. This module contains ... Citation example: [Minh2020]_.
+Bond-Angle-Torsion (BAT) coordinates. Classes in this module can be used
+by themselves or with :class:`MDAnalysis.analysis.encore.free_energy.FreeEnergy`.
 
 
 See Also
@@ -45,13 +44,15 @@ See Also
 Example applications
 --------------------
 
-TODO: Write this. The :class:`~MDAnalysis.analysis.bat.BAT` class defines bond-angle-torsion
-coordinates based on the topology of an atom group and interconverts between
-Cartesian and BAT coordinate systems. For example, we can determine internal
-coordinates for residues 5-10 of adenylate kinase (AdK). The trajectory is
+The :class:`~MDAnalysis.analysis.bat.IndependentGaussianModel` class models
+the bond lengths, angles, and torsions as independent Gaussians and external
+coordinates by a kernel density estimate. For example, we can create ensemble
+models for residues 5-10 of adenylate kinase (AdK). The trajectory is
 included within the test data files::
 
    import MDAnalysis as mda
+   from MDAnalysis.analysis.encore.bat_models import IndependentGaussianModel
+
    from MDAnalysisTests.datafiles import PSF, DCD
    import numpy as np
 
@@ -60,21 +61,17 @@ included within the test data files::
    # selection of atomgroups
    selected_residues = u.select_atoms("resid 5-10")
 
-   from MDAnalysis.analysis.bat import BAT
-   R = BAT(selected_residues)
+   # Initiate the ensemble model, including calculating BAT coordinates
+   enmodel = IndependentBATEnsembleModel(selected_residues)
 
-   # Calculate BAT coordinates for a trajectory
-   R.run()
+   # This attribute contains the log partition function for the model
+   print(enmodel.lnZ)
 
-   # Reconstruct Cartesian coordinates from BAT coordinates
-   bat = R.bat[0]
-   XYZ = R.Cartesian(bat)
+   # Generate 10 random samples
+   print(enmodel.rvs(10))
 
-   # The difference between the original and reconstructed coordinates
-   # should be zero.
-   print(np.sum(np.abs(XYZ - selected_residues.positions)>1E-6))
-
-After R.run(), the coordinates can be accessed with :attr:`R.bat`.
+   # Evaluate the log probability density of the initial configuration
+   print(enmodel.logpdf())
 
 
 References
@@ -85,15 +82,11 @@ References
    *Journal of Computational Chemistry* 41(7): 715–30.
    doi:`10.1002/jcc.26036 <https://doi.org/10.1002/jcc.26036>`_
 
-TODO: Format this
-    Adapted measure_torsion_shifts and fitting from
-
-    Gyimesi G, Zavodszky P, Szilagyi A:
-    Calculation of configurational entropy differences from conformational ensembles using
-    Gaussian mixtures.
-    J. Chem. Theory Comput., (Just Accepted Manuscript)
-    DOI: 10.1021/acs.jctc.6b00837
-    http://gmentropy.szialab.org/
+.. [Gyimesi2017] Gyimesi, Gergely, Péter Závodszky, and András Szilágyi.
+   “Calculation of Configurational Entropy Differences from Conformational
+   Ensembles Using Gaussian Mixtures.” *Journal of Chemical Theory and
+   Computation* 13(1): 29–41. `doi:10.1021/acs.jctc.6b00837
+   <https://doi.org/10.1021/acs.jctc.6b00837>`_
 
 """
 from __future__ import absolute_import
@@ -107,8 +100,11 @@ import MDAnalysis as mda
 from MDAnalysis.analysis.base import AnalysisBase
 from MDAnalysis.analysis.bat import BAT
 
-from MDAnalysis.analysis.encore.partial_models.gaussian import Gaussian
-from MDAnalysis.analysis.encore.partial_models.external import Translational, Rotational
+from .partial_models.independentgaussian import IndependentGaussian
+from .partial_models.multivariategaussian import MultivariateGaussian
+from .partial_models.independentkde import IndependentKDE
+from .partial_models.principalcomponentskde import PrincipalComponentsKDE
+from .partial_models.external import Translational, Rotational
 
 tau = 2 * np.pi
 
@@ -126,13 +122,13 @@ def measure_torsion_shifts(A):
     Parameters
     ----------
     A : np.array
-      an array with dimensions (N, K), where N is the number of samples
-      and K is the number of degrees of freedom.
+        an array with dimensions (N, K), where N is the number of samples
+        and K is the number of degrees of freedom.
 
     Returns
     -------
     shifts : np.array
-      an array with dimensions (K,), where K is the number of degrees of freedom.
+        an array with dimensions (K,), where K is the number of degrees of freedom.
 
     """
     shifts = np.zeros(A.shape[1])
@@ -175,22 +171,61 @@ def measure_torsion_shifts(A):
 class EnsembleModelBase(AnalysisBase):
     """Base class to model an ensemble as a probability distribution
 
-    Model based on this class should implement the methods rvs and logpdf.
+    Subclasses should implement _setup_partial_models.
+    If the partial models are not bonds, angles, shifted_torsions,
+    translation, and rotation, then rvs and logpdf need to be reimplemented.
+
+    Attributes
+    ----------
+    lnZ : dict
+        Log configurational integral/normalizing constant for different
+        partial models
+    logpdf_MM : np.array
+        Log probability density of snapshots in the trajectory
+        according to its molecular mechanics energy function. This is
+        optional for initiating the class but a helpful attribute for
+        :class:`MDAnalysis.analysis.encore.free_energy.FreeEnergy`.
+    _partial_models : dict
+        Partial models used by subclasses to implement rvs and logpdf
 
     """
-    def __init__(self, BAT, model_external=False, **kwargs):
+    def __init__(self, model_external=False, logpdf_MM=None, \
+                 ag=None, initial_atom=None, BAT_ag=None, **kwargs):
         r"""Parameters
         ----------
-        BAT : MDAnalysis.analysis.bat.BAT
-            an instance of :class:`MDAnalysis.analysis.bat.BAT` for the
-            AtomGroup of interest
         model_external : bool
             Whether to model external degrees of freedom or not
+        logpdf_MM : np.array
+            Log probability density of snapshots in the trajectory
+            according to its molecular mechanics energy function. This is
+            optional for initiating the class but a helpful attribute for
+            :class:`MDAnalysis.analysis.encore.free_energy.FreeEnergy`.
+        ag : AtomGroup or Universe
+            Group of atoms for which the BAT coordinates are either provided
+            in the BAT_ag parameter or calculated using the
+            :class:`analysis.bat <MDAnalysis.analysis.bat` class. If None,
+            BAT_ag needs to be provided.
+        initial_atom : Atom
+            The atom whose Cartesian coordinates define the translation
+            of the molecule. If None, the heaviest terminal atom
+            will be selected. This parameter is only used if the BAT_ag
+            parameter is not passed.
+        BAT_ag : MDAnalysis.analysis.bat.BAT
+            an instance of :class:`MDAnalysis.analysis.bat.BAT` for the
+            AtomGroup of interest. If None, an instance will be created using
+            ag and initial_atom.
         """
         super(EnsembleModelBase, self).__init__(\
-            BAT.getAtomGroup().universe.trajectory, **kwargs)
-        self._BAT = BAT
+            ag.universe.trajectory, **kwargs)
+
+        self._ag = ag
         self._model_external = model_external
+        self.logpdf_MM = logpdf_MM
+        if BAT_ag is None:
+            if self._ag is None:
+                raise ValueError('Both ag and BAT_ag are None')
+            BAT_ag = BAT(self._ag, initial_atom)
+        self._BAT = BAT_ag
 
         # If BAT coordinates are not available, run the calculation
         if (not hasattr(self._BAT, 'bat')) or (self._BAT.bat == []):
@@ -202,7 +237,17 @@ class EnsembleModelBase(AnalysisBase):
         self._torsion_shifts = measure_torsion_shifts(\
             bat[:, 2 * self.n_torsions + 9:])
 
+        # Sets up partial models and extracts their partition functions
         self._partial_models = {}
+        self._setup_partial_models()
+        self.lnZ = self._extract_lnZ()
+
+    def _setup_partial_models(self):
+        """Sets up partial models
+
+        This function is the crux of distinctions between subclasses
+        """
+        raise NotImplementedError
 
     def rvs(self, N):
         """Generate random samples
@@ -210,35 +255,58 @@ class EnsembleModelBase(AnalysisBase):
         Parameters
         ----------
         N : int
-          number of samples to generate
+            number of samples to generate
 
         Returns
         -------
         bat : np.array
-          an array with dimensions (N,3A), where A is the number of atoms.
-          The columns are ordered with external then internal
-          degrees of freedom based on the root atoms, followed by the bond,
-          angle, and (proper and improper) torsion coordinates.
+            an array with dimensions (N,3A), where A is the number of atoms.
+            The columns are ordered with external then internal
+            degrees of freedom based on the root atoms, followed by the bond,
+            angle, and (proper and improper) torsion coordinates.
 
         """
-        raise NotImplementedError
+        if self._model_external:
+          external = np.hstack([\
+              self._partial_models['translation'].rvs(N), \
+              self._partial_models['rotation'].rvs(N) \
+          ])
+        else:
+          external = None
+        return self.merge_dofs(
+          external, \
+          self._partial_models['bonds'].rvs(N),
+          self._partial_models['angles'].rvs(N),
+          self._partial_models['shifted_torsions'].rvs(N)
+        )
 
-    def logpdf(self, bat):
+    def logpdf(self, bat=None):
         """Calculate the log probability density
 
         Parameters
         ----------
         bat : np.array
-          an array of coordinates with dimensions (N, K), where N is the
-          number of samples and K is the number of degrees of freedom
+            an array of coordinates with dimensions (N, K), where N is the
+            number of samples and K is the number of degrees of freedom
 
         Returns
         -------
         logpdf : np.array
-          an array with dimensions (N,), with the log probability density
+            an array with dimensions (N,), with the log probability density
 
         """
-        raise NotImplementedError
+        if bat is None:
+            bat = np.copy(self._BAT.bat)
+
+        (external, bonds, angles, shifted_torsions) = self.split_dofs(bat)
+        logpdf = \
+            self._partial_models['bonds'].logpdf(bonds) + \
+            self._partial_models['angles'].logpdf(angles) + \
+            self._partial_models['shifted_torsions'].logpdf(shifted_torsions)
+        if self._model_external:
+          logpdf += self._partial_models['translation'].logpdf(external[:,:3])
+          logpdf += self._partial_models['rotation'].logpdf(external[:,3:6])
+        return logpdf
 
     def split_dofs(self, bat=None):
         """Split a coordinate array into separate arrays
@@ -248,8 +316,8 @@ class EnsembleModelBase(AnalysisBase):
         bat : np.array
             An array with dimensions (N, 3A), where N is the number of samples
             and A is the number of atoms. If bat is None, then it will be taken
-            from the :class:`MDAnalysis.analysis.bat.BAT` instance used to
-            initialize the class.
+            from the :class:`MDAnalysis.analysis.bat.BAT` instance obtained
+            during initialization.
 
         Returns
         -------
@@ -312,8 +380,8 @@ class EnsembleModelBase(AnalysisBase):
         bat : np.array
             An array with dimensions (N, 3A), where N is the number of samples
             and A is the number of atoms. If bat is None, then it will be taken
-            from the :class:`MDAnalysis.analysis.bat.BAT` instance used to
-            initialize the class.
+            from the :class:`MDAnalysis.analysis.bat.BAT` instance obtained
+            during initialization..
         """
         if external is None:
             external = np.tile(self._reference_external, (bonds.shape[0], 1))
@@ -342,67 +410,70 @@ class EnsembleModelBase(AnalysisBase):
         lnZ['total'] = np.sum([lnZ[key] for key in lnZ.keys()])
         return lnZ
 
+class IndependentBATEnsembleModel(EnsembleModelBase):
+    """Ensemble model in which BAT coordinates are independent from each other
 
-class GaussianModel(EnsembleModelBase):
-    """Models an ensemble as independent Gaussians
-
-    Distributions of bond lengths, angles, and torsions will be treated
+    Distributions of bond lengths and angles will be treated
     as independent Gaussians with parameters from sample estimates.
+    The distribution of torsion angles will be treated by different
+    partial models depending on the torsion_model parameter.
+    These partial models can incorporate correlations between
+    different torsion angles.
+    External degrees of freedom are based on kernel density estimates.
 
     """
-    def __init__(self, BAT, model_external=False, **kwargs):
-        r"""Parameters
-        ----------
-        BAT : MDAnalysis.analysis.bat.BAT
-            an instance of :class:`MDAnalysis.analysis.bat.BAT` for the
-            AtomGroup of interest
+    def __init__(self, \
+            torsion_model='IndependentGaussian', \
+            source_model=None, \
+            **kwargs):
+        """{0}
+        torsion_model : str
+            The model for shifted torsion coordinates
+        source_model : IndependentBATEnsembleModel
+            Reuses partial models from the source model
+        """.format(super(IndependentBATEnsembleModel, self).__init__.__doc__)
+        self._torsion_model = torsion_model
+        self._source_model = source_model
+        super(IndependentBATEnsembleModel, self).__init__(**kwargs)
+
+
+    def _setup_partial_models(self):
+        """Sets up partial models
+
+        Independent Gaussian models are used for the bond lengths and angles.
+        A multivariate Guassian is used for torsions. External degrees of
+        freedom are based on kernel density estimates.
 
         """
-        super(GaussianModel, self).__init__(BAT, model_external, **kwargs)
-
         (external, bonds, angles, shifted_torsions) = self.split_dofs()
 
-        # Define the partial models based on the sampled data
-        if self._model_external:
-          self._partial_models['translation'] = Translational(external[:,:3])
-          self._partial_models['rotation'] = Rotational(external[:,3:6])
-        self._partial_models['bonds'] = Gaussian(bonds, 'bond')
-        self._partial_models['angles'] = Gaussian(angles, 'angle')
-        self._partial_models['shifted_torsions'] = \
-            Gaussian(shifted_torsions, 'torsion')
-
-        # Extract the partition function from partial models
-        self.lnZ = self._extract_lnZ()
-        # TODO: Free energy of transferring into Gaussian model
-
-    def rvs(self, N):
-        if self._model_external:
-          external = np.hstack([\
-              self._partial_models['translation'].rvs(N), \
-              self._partial_models['rotation'].rvs(N) \
-          ])
+        if self._source_model is None:
+            # Define the partial models based on the sampled data
+            if self._model_external:
+                self._partial_models['translation'] = \
+                    Translational(external[:,:3])
+                self._partial_models['rotation'] = \
+                    Rotational(external[:,3:6])
+            self._partial_models['bonds'] = \
+                IndependentGaussian(bonds, 'bond')
+            self._partial_models['angles'] = \
+                IndependentGaussian(angles, 'angle')
         else:
-          external = None
-        return self.merge_dofs(
-          external, \
-          self._partial_models['bonds'].rvs(N),
-          self._partial_models['angles'].rvs(N),
-          self._partial_models['shifted_torsions'].rvs(N)
-        )
+            # Reuse partial models from source model
+            for subset in ['translation', 'rotation', 'bonds', 'angles']:
+                if subset in self._source_model._partial_models.keys():
+                    self._partial_models[subset] = \
+                        self._source_model._partial_models[subset]
 
-    def logpdf(self, bat=None):
-        if bat is None:
-            bat = np.copy(self._BAT.bat)
-
-        (external, bonds, angles, shifted_torsions) = self.split_dofs(bat)
-        logpdf = \
-            self._partial_models['bonds'].logpdf(bonds) + \
-            self._partial_models['angles'].logpdf(angles) + \
-            self._partial_models['shifted_torsions'].logpdf(shifted_torsions)
-        if self._model_external:
-          logpdf += self._partial_models['translation'].logpdf(external[:,:3])
-          logpdf += self._partial_models['rotation'].logpdf(external[:,3:6])
-        return logpdf
-
-
-# Other possible models include KDEModel, DimredModel, and GaussianMixtureModel
+        if self._torsion_model=='IndependentGaussian':
+            self._partial_models['shifted_torsions'] = \
+                IndependentGaussian(shifted_torsions, 'torsion')
+        elif self._torsion_model=='IndependentKDE':
+            self._partial_models['shifted_torsions'] = \
+                IndependentKDE(shifted_torsions, 'torsion')
+        elif self._torsion_model=='MultivariateGaussian':
+            self._partial_models['shifted_torsions'] = \
+                MultivariateGaussian(shifted_torsions, 'torsion')
+        elif self._torsion_model=='PrincipalComponentsKDE':
+            self._partial_models['shifted_torsions'] = \
+                PrincipalComponentsKDE(shifted_torsions, 'torsion')
