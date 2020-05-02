@@ -29,7 +29,7 @@ r"""Base class for partial models --- :mod:`MDAnalysis.analysis.encore.partial_m
 
 .. versionadded:: N/A
 
-This module contains a base class for modelling degrees a subset of the degrees of
+This module contains a base class for modelling a subset of the degrees of
 freedom.
 
 """
