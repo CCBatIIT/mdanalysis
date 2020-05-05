@@ -44,12 +44,18 @@ class IndependentGaussian(PartialModelBase):
     """Models a subset of the degrees of freedom as independent Gaussians
 
     The mean and standard deviation is based on the sample mean and standard
-    deviation. The Jacobian is dependent on whether the degree of freedom is
+    deviation.
+
+    If the sample standard deviation is below a cutoff value, std_cutoff,
+    the degree of freedom is treated as constrained to the mean. It does
+    not contribute to the partition function or the log probability.
+
+    The Jacobian is dependent on whether the degree of freedom is
     a bond, angle, or torsion. It is approximated as a constant, based on
     the mean value for the degree of freedom.
 
     """
-    def __init__(self, X, coordinate_type):
+    def __init__(self, X, coordinate_type, std_cutoff=0.01):
         """Parameters
         ----------
         X : np.array
@@ -62,32 +68,43 @@ class IndependentGaussian(PartialModelBase):
             raise ValueError('error: coordinate_type must be ' + \
                              '"bond", "angle", or "torsion"')
         self.coordinate_type = coordinate_type
+        self._std_cutoff = std_cutoff
 
         # Determine parameters
         self._means = np.mean(X, 0)
         self._stdevs = np.std(X, 0)
-        self.K = X.shape[1]
+
+        # The degrees of freedom have a standard deviation above the cutoff
+        self._is_dof = self._stdevs>self._std_cutoff
+        self.K = np.sum(self._is_dof)
 
         # Calculate the log normalizing constant, including the Jacobian factor
-        if coordinate_type == 'bond':
+        if self.coordinate_type == 'bond':
             # For the bond length, $b$, the Jacobian is $b^2$.
             self.lnZ_J = 2 * np.sum(np.log(self._means))
-        elif coordinate_type == 'angle':
+        elif self.coordinate_type == 'angle':
             # For the bond angle, $\theta$, the Jacobian is $sin(\theta)$
             self.lnZ_J = 2 * np.sum(np.log(np.sin(self._means)))
-        elif coordinate_type == 'torsion':
+        elif self.coordinate_type == 'torsion':
             # For torsions, the Jacobian is unity
             self.lnZ_J = 0.
         # For a Gaussian distribution,
         # $Z = \sqrt{2 \pi} \sigma$
         # $\ln(Z) = 1/2 \ln (2 \pi} + \ln (\sigma)$
-        self.lnZ = np.log(tau) * self.K / 2. + np.sum(np.log(self._stdevs))
+        self.lnZ = np.log(tau) * self.K / 2. + \
+            np.sum(np.log(self._stdevs[self._is_dof]))
 
     def rvs(self, N):
+        X = np.zeros((N,self._means.shape[0]))
         stdrandn = np.random.randn(N, self.K)
-        return self._stdevs * stdrandn + self._means
+        rvs = self._stdevs[self._is_dof] * stdrandn + \
+            self._means[self._is_dof]
+        X[:,self._is_dof] = rvs
+        X[:,~self._is_dof] = self._means[~self._is_dof]
+        return X
 
     def logpdf(self, X):
-        stddelta = (X - self._means) / self._stdevs
+        stddelta = (X[:,self._is_dof] - self._means[self._is_dof]) / \
+                    self._stdevs[self._is_dof]
         logpdf = -np.sum(np.square(stddelta) / 2., axis=1) - self.lnZ
         return logpdf
