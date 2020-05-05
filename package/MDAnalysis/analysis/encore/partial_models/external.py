@@ -67,7 +67,7 @@ class Translational(PrincipalComponentsKDE):
             The translational degrees of freedom.
             An array with dimensions (N, 3), where N is the number of samples.
         """
-        super(Translational, self).__init__(X)
+        super(Translational, self).__init__(X, coordinate_type='translation')
 
         # Standard state correction for confining the system into a box
         # The standard state volume for a single molecule

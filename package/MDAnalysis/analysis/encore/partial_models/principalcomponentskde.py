@@ -59,11 +59,11 @@ class PrincipalComponentsKDE(PartialModelBase):
             an array of coordinates with dimensions (N, K), where N is the
             number of samples and K is the number of degrees of freedom
         coordinate_type : str
-            "bond" or "angle" or "torsion" or None
+            "bond" or "angle" or "torsion" or "translation"
         """
-        if not coordinate_type in ['bond', 'angle', 'torsion', None]:
+        if not coordinate_type in ['bond', 'angle', 'torsion', 'translation']:
             raise ValueError('error: coordinate_type must be ' + \
-                             '"bond", "angle", "torsion", or None')
+                             '"bond", "angle", "torsion", or "translation"')
         self.coordinate_type = coordinate_type
 
         # Performs principal components analysis
@@ -95,7 +95,8 @@ class PrincipalComponentsKDE(PartialModelBase):
         elif coordinate_type == 'angle':
             # For the bond angle, $\theta$, the Jacobian is $sin(\theta)$
             self.lnZ_J = 2 * np.sum(np.log(np.sin(self._means)))
-        elif coordinate_type == 'torsion':
+        elif (coordinate_type == 'torsion') or \
+             (coordinate_type == 'translation'):
             # For torsions, the Jacobian is unity
             self.lnZ_J = 0.
         # The log normalizing constant is zero because the kde is normalized
