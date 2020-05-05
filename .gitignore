@@ -1,3 +1,5 @@
+#
+*default.profraw
 # Ignore python bytecoded files
 *.py[cod]
 *.[oa]

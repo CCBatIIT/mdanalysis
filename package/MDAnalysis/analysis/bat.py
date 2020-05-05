@@ -183,16 +183,21 @@ def _find_torsions(root, allowed_atoms):
             a0_list = _sort_atoms_by_mass(a for a in a1.bonded_atoms \
                 if (a in allowed_atoms) and (a not in selected_atoms))
             for a0 in a0_list:
-                # Find a2, which is connected to a1 and has been selected
+                # print(f'a0 {a0.index+1} a1 {a1.index+1}')
+                # Find a2, which is connected to a1, is not a terminal atom,
+                # and has been selected
                 a2_list = _sort_atoms_by_mass(a for a in a1.bonded_atoms \
-                    if (a in allowed_atoms) and (a in selected_atoms))
+                    if (a!=a0) and len(a.bonded_atoms)>1 and \
+                        (a in allowed_atoms) and (a in selected_atoms))
                 for a2 in a2_list:
+                    # print(f'a0 {a0.index+1} a1 {a1.index+1} a2 {a2.index+1}')
                     # Find a3, which is
                     # connected to a2, has been selected, and is not a1
                     a3_list = _sort_atoms_by_mass(a for a in a2.bonded_atoms \
                         if (a!=a1) and \
                             (a in allowed_atoms) and (a in selected_atoms))
                     for a3 in a3_list:
+                        # print(f'a0 {a0.index+1} a1 {a1.index+1} a2 {a2.index+1} a3 {a3.index+1}')
                         # Add the torsion to the list of torsions
                         torsions.append(mda.AtomGroup([a0, a1, a2, a3]))
                         # Add the new atom to selected_atoms
@@ -202,7 +207,11 @@ def _find_torsions(root, allowed_atoms):
                         break # out of the a3 loop
                     break # out of the a2 loop
         if torsionAdded is False:
-            raise ValueError('Torsion not found.')
+            print('Selected atoms:')
+            print([a.index+1 for a in selected_atoms])
+            print('Torsions found:')
+            print([list(t.indices+1) for t in torsions])
+            raise ValueError('Additional torsions not found.')
     return torsions
 
 
@@ -423,6 +432,7 @@ class BAT(AnalysisBase):
         # Rotate the third atom by the appropriate value
         co = np.cos(omega)
         so = np.sin(omega)
+        # $R_Z(\omega)$
         Romega = np.array([[co, -so, 0], [so, co, 0], [0, 0, 1]])
         p2 = Romega.dot(p2)
         # Rotate the second two atoms to point in the right direction
@@ -430,6 +440,7 @@ class BAT(AnalysisBase):
         sp = np.sin(phi)
         ct = np.cos(theta)
         st = np.sin(theta)
+        # $R_Z(\phi) R_Y(\theta)$
         Re = np.array([[cp * ct, -sp, cp * st], [ct * sp, cp, sp * st],
                        [-st, 0, ct]])
         p1 = Re.dot(p1)
