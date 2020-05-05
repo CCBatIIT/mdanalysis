@@ -245,12 +245,14 @@ def _find_torsions(root, atoms):
                     if (a!=a0) and len(a.bonded_atoms)>1 and \
                         (a in atoms) and (a in selected_atoms))
                 for a2 in a2_list:
+                    # print(f'a0 {a0.index+1} a1 {a1.index+1} a2 {a2.index+1}')
                     # Find a3, which is
                     # connected to a2, has been selected, and is not a1
                     a3_list = _sort_atoms_by_mass(a for a in a2.bonded_atoms \
                         if (a!=a1) and \
                             (a in atoms) and (a in selected_atoms))
                     for a3 in a3_list:
+                        # print(f'a0 {a0.index+1} a1 {a1.index+1} a2 {a2.index+1} a3 {a3.index+1}')
                         # Add the torsion to the list of torsions
                         torsions.append(mda.AtomGroup([a0, a1, a2, a3]))
                         # Add the new atom to selected_atoms
