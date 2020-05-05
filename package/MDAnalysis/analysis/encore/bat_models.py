@@ -71,7 +71,7 @@ included within the test data files::
    print(enmodel.rvs(10))
 
    # Evaluate the log probability density of the initial configuration
-   print(enmodel.logpdf())
+   print(enmodel._())
 
 
 References
@@ -168,7 +168,7 @@ def measure_torsion_shifts(A):
     return shifts
 
 
-class EnsembleModelBase(AnalysisBase):
+class EnsembleModelBase:
     """Base class to model an ensemble as a probability distribution
 
     Subclasses should implement _setup_partial_models.
@@ -180,58 +180,24 @@ class EnsembleModelBase(AnalysisBase):
     lnZ : dict
         Log configurational integral/normalizing constant for different
         partial models
-    logpdf_MM : np.array
-        Log probability density of snapshots in the trajectory
-        according to its molecular mechanics energy function. This is
-        optional for initiating the class but a helpful attribute for
-        :class:`MDAnalysis.analysis.encore.free_energy.FreeEnergy`.
     _partial_models : dict
         Partial models used by subclasses to implement rvs and logpdf
 
     """
-    def __init__(self, model_external=False, logpdf_MM=None, \
-                 ag=None, initial_atom=None, BAT_ag=None, **kwargs):
+    def __init__(self, bat, model_external=False, **kwargs):
         r"""Parameters
         ----------
+        bat : np.array
+            an array with dimensions (N,3A), where A is the number of atoms.
+            The columns are ordered with external then internal
+            degrees of freedom based on the root atoms, followed by the bond,
+            angle, and (proper and improper) torsion coordinates.
         model_external : bool
             Whether to model external degrees of freedom or not
-        logpdf_MM : np.array
-            Log probability density of snapshots in the trajectory
-            according to its molecular mechanics energy function. This is
-            optional for initiating the class but a helpful attribute for
-            :class:`MDAnalysis.analysis.encore.free_energy.FreeEnergy`.
-        ag : AtomGroup or Universe
-            Group of atoms for which the BAT coordinates are either provided
-            in the BAT_ag parameter or calculated using the
-            :class:`analysis.bat <MDAnalysis.analysis.bat` class. If None,
-            BAT_ag needs to be provided.
-        initial_atom : Atom
-            The atom whose Cartesian coordinates define the translation
-            of the molecule. If None, the heaviest terminal atom
-            will be selected. This parameter is only used if the BAT_ag
-            parameter is not passed.
-        BAT_ag : MDAnalysis.analysis.bat.BAT
-            an instance of :class:`MDAnalysis.analysis.bat.BAT` for the
-            AtomGroup of interest. If None, an instance will be created using
-            ag and initial_atom.
         """
-        super(EnsembleModelBase, self).__init__(\
-            ag.universe.trajectory, **kwargs)
-
-        self._ag = ag
+        self._bat = bat
         self._model_external = model_external
-        self.logpdf_MM = logpdf_MM
-        if BAT_ag is None:
-            if self._ag is None:
-                raise ValueError('Both ag and BAT_ag are None')
-            BAT_ag = BAT(self._ag, initial_atom)
-        self._BAT = BAT_ag
 
-        # If BAT coordinates are not available, run the calculation
-        if (not hasattr(self._BAT, 'bat')) or (self._BAT.bat == []):
-            self._BAT.run()
-
-        bat = np.array(self._BAT.bat)
         self.n_torsions = int((bat.shape[1] - 9) / 3)
         self._reference_external = np.copy(bat[0][:6])
         self._torsion_shifts = measure_torsion_shifts(\
@@ -296,7 +262,7 @@ class EnsembleModelBase(AnalysisBase):
 
         """
         if bat is None:
-            bat = np.copy(self._BAT.bat)
+            bat = self._bat
 
         (external, bonds, angles, shifted_torsions) = self.split_dofs(bat)
         logpdf = \
@@ -338,7 +304,7 @@ class EnsembleModelBase(AnalysisBase):
         """
 
         if bat is None:
-            bat = np.copy(self._BAT.bat)
+            bat = self._bat
 
         external = bat[:,:6]
         bond_indices = [6, 7] + list(range(9, self.n_torsions + 9))
@@ -422,7 +388,7 @@ class IndependentBATEnsembleModel(EnsembleModelBase):
     External degrees of freedom are based on kernel density estimates.
 
     """
-    def __init__(self, \
+    def __init__(self, bat,
             torsion_model='IndependentGaussian', \
             source_model=None, \
             **kwargs):
@@ -434,7 +400,7 @@ class IndependentBATEnsembleModel(EnsembleModelBase):
         """.format(super(IndependentBATEnsembleModel, self).__init__.__doc__)
         self._torsion_model = torsion_model
         self._source_model = source_model
-        super(IndependentBATEnsembleModel, self).__init__(**kwargs)
+        super(IndependentBATEnsembleModel, self).__init__(bat, **kwargs)
 
 
     def _setup_partial_models(self):
