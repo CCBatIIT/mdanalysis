@@ -104,6 +104,7 @@ from .partial_models.independentgaussian import IndependentGaussian
 from .partial_models.multivariategaussian import MultivariateGaussian
 from .partial_models.independentkde import IndependentKDE
 from .partial_models.principalcomponentskde import PrincipalComponentsKDE
+from .partial_models.gaussianmixture import GaussianMixture
 from .partial_models.external import Translational, Rotational
 
 tau = 2 * np.pi
@@ -443,3 +444,8 @@ class IndependentBATEnsembleModel(EnsembleModelBase):
         elif self._torsion_model=='PrincipalComponentsKDE':
             self._partial_models['shifted_torsions'] = \
                 PrincipalComponentsKDE(shifted_torsions, 'torsion')
+        elif self._torsion_model=='GaussianMixture':
+            self._partial_models['shifted_torsions'] = \
+                GaussianMixture(shifted_torsions, 'torsion')
+        else:
+            raise ValueError('Selected torsion model not found')
