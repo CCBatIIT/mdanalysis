@@ -81,15 +81,17 @@ class MultivariateGaussian(PartialModelBase):
             # For torsions, the Jacobian is unity
             self.lnZ_J = 0.
 
+        # Logpdf results are normalized
+        self.lnZ = 0.
         # For a multivariate Gaussian distribution,
         # Z = (2 \pi)^(K/2) |\Sigma|^{1/2}
         # ln Z = K/2 \ln (2 \pi) + 1/2 \ln (|\Sigma|)
-        (signdet, lndet) = np.linalg.slogdet(cov)
-        if signdet == 1.0:
-            self.lnZ = np.log(tau) * self.K / 2. + lndet / 2.
-        else:
-            raise ValueError('The sign on the determinant of the covariance' + \
-                             'matrix is not one.')
+        # (signdet, lndet) = np.linalg.slogdet(cov)
+        # if signdet == 1.0:
+        #     self.lnZ = np.log(tau) * self.K / 2. + lndet / 2.
+        # else:
+        #     raise ValueError('The sign on the determinant of the covariance' + \
+        #                      'matrix is not one.')
 
     def rvs(self, N):
         return self._mvn.rvs(N)
