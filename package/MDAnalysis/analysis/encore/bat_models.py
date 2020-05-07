@@ -102,8 +102,8 @@ from MDAnalysis.analysis.bat import BAT
 
 from .partial_models.independentgaussian import IndependentGaussian
 from .partial_models.multivariategaussian import MultivariateGaussian
-from .partial_models.independentkde import IndependentKDE
-from .partial_models.principalcomponentskde import PrincipalComponentsKDE
+from .partial_models.gaussiankde import IndependentKDE
+from .partial_models.gaussiankde import PrincipalComponentsKDE
 from .partial_models.gaussianmixture import GaussianMixture
 from .partial_models.external import Translational, Rotational
 
