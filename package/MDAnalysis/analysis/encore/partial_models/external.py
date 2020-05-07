@@ -51,7 +51,7 @@ from scipy.stats import gaussian_kde
 from scipy.stats import rv_discrete
 
 from .base import PartialModelBase
-from .principalcomponentskde import PrincipalComponentsKDE
+from .gaussiankde import PrincipalComponentsKDE
 
 class Translational(PrincipalComponentsKDE):
     """Models translational degrees of freedom
@@ -69,14 +69,14 @@ class Translational(PrincipalComponentsKDE):
         """
         super(Translational, self).__init__(X, coordinate_type='translation')
 
+        # Log volume of the binding site
+        box = [(self._edges[dim][-1] - self._edges[dim][0]) \
+            for dim in range(3)]
+        self.lnV_site = np.sum([np.log(box) for dim in range(3)])
         # Standard state correction for confining the system into a box
         # The standard state volume for a single molecule
         # in a box of size 1 L is 1.66053928 nanometers**3
-        box = [(self._intervals[dim][1] - self._intervals[dim][0]) \
-            for dim in range(3)]
-        self.DeltaG_xi = np.sum([np.log(box) for dim in range(3)]) - \
-            np.log(1660.53928)
-
+        self.DeltaG_xi = -self.lnV_site + np.log(1660.53928)
 
 class Rotational(PartialModelBase):
     """Models rotational degrees of freedom
@@ -124,16 +124,28 @@ class Rotational(PartialModelBase):
             # Convolution
             rho = np.abs(np.fft.fftshift(np.fft.ifft(\
                          np.fft.fft(H)*np.fft.fft(ker))).real)
+            # For rv_discrete, the sum of probabilities is required to be one
             rho /= np.sum(rho)
             # Initiat discretized random variable
             rv = rv_discrete(name=name, values=(range(len(rho)), rho))
+            # Because a numerical integral is np.sum(rho*delta),
+            # probabilities from rv_discrete will be divided by delta
+            # so that they are normalized
 
+            # These are numerical integrals of $I(\xi)J(\xi)$
+            # over rotational dofs
             if dim in [0, 2]:
-                self.lnZ += np.log(np.sum(rho) * delta)
+                # $Z = \sum_i^n_b \rho(x_i) \delta = 1$
+                # \sum_i \delta = n_b \delta = 2 \pi
+                self.lnZ += 0.
             else:
                 # The second Euler angle has a Jacobian
-                self.lnZ += np.log(np.sum(np.sin(centers) * rho) * delta)
+                # $Z = \sum_i^n_b \rho(x_i) sin(x_i) \delta = 1$
+                # \sum_i^n_b sin(x_i) \delta = 2$
+                self.lnZ += np.log(np.sum(np.sin(centers)*rho/delta))
 
+            # There is no lnZ_J because the Jacobian is not assumed to be
+            # a constant, but part of the integral over theta
             self._rv_discrete.append(rv)
             self._edges.append(edges)
             self._centers.append(centers)
@@ -174,6 +186,7 @@ class Rotational(PartialModelBase):
             The density is approximated as constant within the bin.
 
         """
-        return np.sum([self._rv_discrete[dim].logpmf(\
-            np.floor((X[:,dim] - self._edges[dim][0])/self._delta[dim])) \
-                for dim in range(3)],0)
+        return np.sum([\
+            self._rv_discrete[dim].logpmf(\
+                  np.floor((X[:,dim] - self._edges[dim][0])/self._delta[dim])
+              ) - np.log(self._delta[dim]) for dim in range(3)],0)
