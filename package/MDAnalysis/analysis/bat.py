@@ -190,11 +190,6 @@ logger = logging.getLogger(__name__)
 
 
 
-def relative_external(ext1, ext2):
-    r"""
-    """
-
-
 def _sort_atoms_by_mass(atoms, reverse=False):
     r"""Sorts a list of atoms by name and then by index
 
