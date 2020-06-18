@@ -240,14 +240,12 @@ def _find_torsions(root, atoms):
                     if (a!=a0) and len(a.bonded_atoms)>1 and \
                         (a in atoms) and (a in selected_atoms))
                 for a2 in a2_list:
-                    # print(f'a0 {a0.index+1} a1 {a1.index+1} a2 {a2.index+1}')
                     # Find a3, which is
                     # connected to a2, has been selected, and is not a1
                     a3_list = _sort_atoms_by_mass(a for a in a2.bonded_atoms \
                         if (a!=a1) and \
                             (a in atoms) and (a in selected_atoms))
                     for a3 in a3_list:
-                        # print(f'a0 {a0.index+1} a1 {a1.index+1} a2 {a2.index+1} a3 {a3.index+1}')
                         # Add the torsion to the list of torsions
                         torsions.append(mda.AtomGroup([a0, a1, a2, a3]))
                         # Add the new atom to selected_atoms
@@ -479,24 +477,54 @@ class BAT(AnalysisBase):
         """
         np.save(filename, self.bat)
 
-    def load_bat(self, FN):
-        """Loads the bat trajectory from a netcdf file
-        """
-        nc_F = Dataset(FN,'r')
-        self.bat = list(np.array(nc_F.variables['bat']))
-        nc_F.close()
+    def load(self, filename, start=None, stop=None, step=None):
+        """Loads the bat trajectory from a file in numpy binary format
 
-    def save_bat(self, FN):
-        """Saves the bat trajectory to a netcdf file
-        """
-        bat = np.array(self.bat)
+        Parameters
+        ----------
+        filename : str
+            name of numpy binary file
+        start : int, optional
+            start frame of analysis
+        stop : int, optional
+            stop frame of analysis
+        step : int, optional
+            number of frames to skip between each analysed frame
 
-        nc_F = Dataset(FN,'w')
-        frames = nc_F.createDimension("frames", bat.shape[0])
-        dims = nc_F.createDimension("dims", bat.shape[1])
-        bat_in_F = nc_F.createVariable("bat", "f4", ("frames","dims"))
-        bat_in_F[:] = bat
-        nc_F.close()
+        See Also
+        --------
+        save: Saves the bat trajectory in a file in numpy binary format
+        """
+        logger.info("Choosing frames")
+        self._setup_frames(self._trajectory, start, stop, step)
+
+        logger.info("Loading file")
+        self.bat = np.load(filename)
+
+        # Check array dimensions
+        if self.bat.shape!=(self.n_frames, 3*self._ag.n_atoms):
+          raise ValueError('Dimensions of array in loaded file, ' + \
+              f'({bat.shape[0]},{bat.shape[1]}), differ from required' + \
+              f'dimensions of ({self.n_frames, 3*self._ag.n_atoms})')
+        # Check position of initial atom
+        for i, ts in enumerate(self._trajectory[self.start:self.stop:self.step]):
+            self._frame_index = i
+            self._ts = ts
+            self.frames[i] = ts.frame
+            self.times[i] = ts.time
+            if (self.bat[i,:3] != self._root[0].position).any():
+                raise ValueError('Position of initial atom in file ' + \
+                    'inconsistent with current trajectory.')
+        return self
+
+    def save(self, filename):
+        """Saves the bat trajectory in a file in numpy binary format
+
+        See Also
+        --------
+        load: Loads the bat trajectory from a file in numpy binary format
+        """
+        np.save(filename, self.bat)
 
     def Cartesian(self, bat):
         """Conversion of a single frame from BAT to Cartesian coordinates
