@@ -189,7 +189,6 @@ from ..due import due, Doi
 logger = logging.getLogger(__name__)
 
 
-
 def _sort_atoms_by_mass(atoms, reverse=False):
     r"""Sorts a list of atoms by name and then by index
 
@@ -457,55 +456,6 @@ class BAT(AnalysisBase):
           raise ValueError('Dimensions of array in loaded file, ' + \
               f'({self.bat.shape[0]},{self.bat.shape[1]}), differ from ' + \
               f'required dimensions of ({self.n_frames, 3*self._ag.n_atoms})')
-        # Check position of initial atom
-        for i, ts in enumerate(self._trajectory[self.start:self.stop:self.step]):
-            self._frame_index = i
-            self._ts = ts
-            self.frames[i] = ts.frame
-            self.times[i] = ts.time
-            if (self.bat[i,:3] != self._root[0].position).any():
-                raise ValueError('Position of initial atom in file ' + \
-                    'inconsistent with current trajectory.')
-        return self
-
-    def save(self, filename):
-        """Saves the bat trajectory in a file in numpy binary format
-
-        See Also
-        --------
-        load: Loads the bat trajectory from a file in numpy binary format
-        """
-        np.save(filename, self.bat)
-
-    def load(self, filename, start=None, stop=None, step=None):
-        """Loads the bat trajectory from a file in numpy binary format
-
-        Parameters
-        ----------
-        filename : str
-            name of numpy binary file
-        start : int, optional
-            start frame of analysis
-        stop : int, optional
-            stop frame of analysis
-        step : int, optional
-            number of frames to skip between each analysed frame
-
-        See Also
-        --------
-        save: Saves the bat trajectory in a file in numpy binary format
-        """
-        logger.info("Choosing frames")
-        self._setup_frames(self._trajectory, start, stop, step)
-
-        logger.info("Loading file")
-        self.bat = np.load(filename)
-
-        # Check array dimensions
-        if self.bat.shape!=(self.n_frames, 3*self._ag.n_atoms):
-          raise ValueError('Dimensions of array in loaded file, ' + \
-              f'({bat.shape[0]},{bat.shape[1]}), differ from required' + \
-              f'dimensions of ({self.n_frames, 3*self._ag.n_atoms})')
         # Check position of initial atom
         for i, ts in enumerate(self._trajectory[self.start:self.stop:self.step]):
             self._frame_index = i
