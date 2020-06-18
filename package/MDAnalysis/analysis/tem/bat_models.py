@@ -20,7 +20,7 @@
 # MDAnalysis: A Toolkit for the Analysis of Molecular Dynamics Simulations.
 # J. Comput. Chem. 32 (2011), 2319--2327, doi:10.1002/jcc.21787
 #
-r"""BAT Ensemble Models --- :mod:`MDAnalysis.analysis.encore.bat_models`
+r"""BAT Ensemble Models --- :mod:`MDAnalysis.analysis.tem.bat_models`
 ===========================================================================
 
 :Author: David Minh
@@ -29,14 +29,14 @@ r"""BAT Ensemble Models --- :mod:`MDAnalysis.analysis.encore.bat_models`
 
 .. versionadded:: N/A
 
-This module contains classes that model ensembles based on their
+This module contains classes that model thermodynamic ensembles based on their
 Bond-Angle-Torsion (BAT) coordinates. Classes in this module can be used
-by themselves or with :class:`MDAnalysis.analysis.encore.free_energy.FreeEnergy`.
+by themselves or with :class:`MDAnalysis.analysis.tem.free_energy.FreeEnergy`.
 
 
 See Also
 --------
-:func:`~MDAnalysis.analysis.encore.similarity.hes()`
+:func:`~MDAnalysis.analysis.tem.similarity.hes()`
     function that compares two ensembles after representing each as a harmonic
     oscillator
 
@@ -51,7 +51,7 @@ models for residues 5-10 of adenylate kinase (AdK). The trajectory is
 included within the test data files::
 
    import MDAnalysis as mda
-   from MDAnalysis.analysis.encore.bat_models import IndependentGaussianModel
+   from MDAnalysis.analysis.tem.bat_models import IndependentGaussianModel
 
    from MDAnalysisTests.datafiles import PSF, DCD
    import numpy as np
@@ -122,13 +122,13 @@ def measure_torsion_shifts(A):
 
     Parameters
     ----------
-    A : np.array
+    A : numpy.ndarray
         an array with dimensions (N, K), where N is the number of samples
         and K is the number of degrees of freedom.
 
     Returns
     -------
-    shifts : np.array
+    shifts : numpy.ndarray
         an array with dimensions (K,), where K is the number of degrees of freedom.
 
     """
@@ -188,7 +188,7 @@ class EnsembleModelBase:
     def __init__(self, bat, model_external=False, **kwargs):
         r"""Parameters
         ----------
-        bat : np.array
+        bat : numpy.ndarray
             an array with dimensions (N,3A), where A is the number of atoms.
             The columns are ordered with external then internal
             degrees of freedom based on the root atoms, followed by the bond,
@@ -226,7 +226,7 @@ class EnsembleModelBase:
 
         Returns
         -------
-        bat : np.array
+        bat : numpy.ndarray
             an array with dimensions (N,3A), where A is the number of atoms.
             The columns are ordered with external then internal
             degrees of freedom based on the root atoms, followed by the bond,
@@ -252,13 +252,13 @@ class EnsembleModelBase:
 
         Parameters
         ----------
-        bat : np.array
+        bat : numpy.ndarray
             an array of coordinates with dimensions (N, K), where N is the
             number of samples and K is the number of degrees of freedom
 
         Returns
         -------
-        logpdf : np.array
+        logpdf : numpy.ndarray
             an array with dimensions (N,), with the log probability density
 
         """
@@ -280,7 +280,7 @@ class EnsembleModelBase:
 
         Parameters
         ----------
-        bat : np.array
+        bat : numpy.ndarray
             An array with dimensions (N, 3A), where N is the number of samples
             and A is the number of atoms. If bat is None, then it will be taken
             from the :class:`MDAnalysis.analysis.bat.BAT` instance obtained
@@ -288,17 +288,17 @@ class EnsembleModelBase:
 
         Returns
         -------
-        external : np.array
+        external : numpy.ndarray
             The external degrees of freedom, translation and rotation.
             An array with dimensions (N, 6), where N is the number of samples.
-        bonds : np.array
+        bonds : numpy.ndarray
             Bond lengths, starting with r01 and r12, the distances between the
             root atoms. An array with dimensions (N, A-1), where A is the number
             of atoms.
-        angles : np.array
+        angles : numpy.ndarray
             Bond angles, starting with a0123, the angle between the root atoms.
             An array with dimensions (N, A-2), where A is the number of atoms.
-        shifted_torsions : np.array
+        shifted_torsions : numpy.ndarray
             Torsion angles, shifted so minimize probability density at the
             periodic boundary. An array with dimensions (N, A-3), where
             A is the number of atoms.
@@ -324,27 +324,27 @@ class EnsembleModelBase:
 
         Parameters
         ----------
-        external : np.array or None
+        external : numpy.ndarray or None
             The external degrees of freedom, translation and rotation.
             If if it is an array, it should have dimensions (N, 6),
             where N is the number of samples.
             If if it is None, then external degrees of freedom from the first
             frame of initial trajectory will be used.
-        bonds : np.array
+        bonds : numpy.ndarray
             Bond lengths, starting with r01 and r12, the distances between the
             root atoms. An array with dimensions (N, A-1), where A is the number
             of atoms.
-        angles : np.array
+        angles : numpy.ndarray
             Bond angles, starting with a0123, the angle between the root atoms.
             An array with dimensions (N, A-2), where A is the number of atoms.
-        shifted_torsions : np.array
+        shifted_torsions : numpy.ndarray
             Torsion angles, shifted so minimize probability density at the
             periodic boundary. An array with dimensions (N, A-3), where
             A is the number of atoms.
 
         Returns
         -------
-        bat : np.array
+        bat : numpy.ndarray
             An array with dimensions (N, 3A), where N is the number of samples
             and A is the number of atoms. If bat is None, then it will be taken
             from the :class:`MDAnalysis.analysis.bat.BAT` instance obtained

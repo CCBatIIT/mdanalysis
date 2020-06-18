@@ -20,7 +20,7 @@
 # MDAnalysis: A Toolkit for the Analysis of Molecular Dynamics Simulations.
 # J. Comput. Chem. 32 (2011), 2319--2327, doi:10.1002/jcc.21787
 #
-r"""Base class for partial models --- :mod:`MDAnalysis.analysis.encore.partial_models.base`
+r"""Base class for partial models --- :mod:`MDAnalysis.analysis.tem.partial_models.base`
 ===========================================================================
 
 :Author: David Minh
@@ -45,7 +45,7 @@ class PartialModelBase:
     def __init__(self, X):
         """Parameters
         ----------
-        X : np.array
+        X : numpy.ndarray
             an array of coordinates with dimensions (N, K), where N is the
             number of samples and K is the number of degrees of freedom
         """
@@ -61,7 +61,7 @@ class PartialModelBase:
 
         Returns
         -------
-        X : np.array
+        X : numpy.ndarray
             an array of coordinates with dimensions (N, K), where N is the
             number of samples and K is the number of degrees of freedom
 
@@ -73,13 +73,13 @@ class PartialModelBase:
 
         Parameters
         ----------
-        X : np.array
+        X : numpy.ndarray
             an array of coordinates with dimensions (N, K), where N is the
             number of samples and K is the number of degrees of freedom
 
         Returns
         -------
-        logpdf : np.array
+        logpdf : numpy.ndarray
             an array with dimensions (N,), with the log probability density
 
         """

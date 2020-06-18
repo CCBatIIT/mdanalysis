@@ -70,9 +70,9 @@ def FEP_and_BAR(w_F, w_R=None):
 
     Parameters
     ----------
-    w_F : np.array
+    w_F : numpy.ndarray
         The work of going from A to B
-    w_R : np.array
+    w_R : numpy.ndarray
         The work of going from B to A
 
     Returns
@@ -115,9 +115,9 @@ class FreeEnergy():
     def __init__(self, A_m, B_m):
         r"""Parameters
         ----------
-        A_m : class in encore.bat_models
+        A_m : class in tem.bat_models
             Ensemble model for state A
-        B_m : class in encore.bat_models
+        B_m : class in tem.bat_models
             Ensemble model for state B
         """
         self._A_m = A_m

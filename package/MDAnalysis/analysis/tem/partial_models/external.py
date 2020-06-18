@@ -20,7 +20,7 @@
 # MDAnalysis: A Toolkit for the Analysis of Molecular Dynamics Simulations.
 # J. Comput. Chem. 32 (2011), 2319--2327, doi:10.1002/jcc.21787
 #
-r"""Model for external degrees of freedom --- :mod:`MDAnalysis.analysis.encore.partial_models.external`
+r"""Model for external degrees of freedom --- :mod:`MDAnalysis.analysis.tem.partial_models.external`
 ===========================================================================
 
 :Author: David Minh
@@ -63,7 +63,7 @@ class Translational(PrincipalComponentsKDE):
     def __init__(self, X):
         """Parameters
         ----------
-        X : np.array
+        X : numpy.ndarray
             The translational degrees of freedom.
             An array with dimensions (N, 3), where N is the number of samples.
         """
@@ -89,7 +89,7 @@ class Rotational(PartialModelBase):
     def __init__(self, rot, nbins=100):
         """Parameters
         ----------
-        rot : np.array
+        rot : numpy.ndarray
             The rotational degrees of freedom.
             An array with dimensions (N, 3), where N is the number of samples.
         nbins : int
@@ -161,27 +161,27 @@ class Rotational(PartialModelBase):
 
         Returns
         -------
-        X : np.array
+        X : numpy.ndarray
             an array of coordinates with dimensions (N, 3), where N is the
             number of samples. Samples are at the bin centers.
 
         """
         samples = [self._centers[dim][self._rv_discrete[dim].rvs(size=N)] \
             for dim in range(3)]
-        return np.array(samples).transpose()
+        return numpy.ndarray(samples).transpose()
 
     def logpdf(self, X):
         """Calculate the log probability density
 
         Parameters
         ----------
-        X : np.array
+        X : numpy.ndarray
             an array of coordinates with dimensions (N, 3), where N is the
             number of samples
 
         Returns
         -------
-        logpdf : np.array
+        logpdf : numpy.ndarray
             an array with dimensions (N,), with the log probability density.
             The density is approximated as constant within the bin.
 

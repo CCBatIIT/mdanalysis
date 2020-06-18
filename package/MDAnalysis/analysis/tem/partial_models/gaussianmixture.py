@@ -20,7 +20,7 @@
 # MDAnalysis: A Toolkit for the Analysis of Molecular Dynamics Simulations.
 # J. Comput. Chem. 32 (2011), 2319--2327, doi:10.1002/jcc.21787
 #
-r"""Gaussian mixture partial model --- :mod:`MDAnalysis.analysis.encore.partial_models.gaussianmixture`
+r"""Gaussian mixture partial model --- :mod:`MDAnalysis.analysis.tem.partial_models.gaussianmixture`
 ===========================================================================
 
 :Author: David Minh
@@ -56,7 +56,7 @@ class GaussianMixture(PartialModelBase):
     def __init__(self, X, coordinate_type, fraction_train=0.8):
         """Parameters
         ----------
-        X : np.array
+        X : numpy.ndarray
             an array of coordinates with dimensions (N, K), where N is the
             number of samples and K is the number of degrees of freedom
         coordinate_type : str
