@@ -38,7 +38,7 @@ import numpy as np
 tau = 2 * np.pi
 
 from .base import PartialModelBase
-from ..covariance import shrinkage_covariance_estimator
+from MDAnalysis.analysis.encore.covariance import shrinkage_covariance_estimator
 from scipy.stats import multivariate_normal
 
 class MultivariateGaussian(PartialModelBase):

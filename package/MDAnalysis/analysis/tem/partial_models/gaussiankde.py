@@ -41,7 +41,7 @@ from scipy.stats import gaussian_kde
 from scipy.stats import rv_discrete
 
 from .base import PartialModelBase
-from ..covariance import shrinkage_covariance_estimator
+from MDAnalysis.analysis.encore.covariance import shrinkage_covariance_estimator
 
 class IndependentKDE(PartialModelBase):
     """Models a subset of the degrees of freedom as independent KDEs

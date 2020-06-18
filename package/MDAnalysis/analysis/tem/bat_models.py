@@ -36,7 +36,7 @@ by themselves or with :class:`MDAnalysis.analysis.tem.free_energy.FreeEnergy`.
 
 See Also
 --------
-:func:`~MDAnalysis.analysis.tem.similarity.hes()`
+:func:`~MDAnalysis.analysis.encore.similarity.hes()`
     function that compares two ensembles after representing each as a harmonic
     oscillator
 
@@ -102,8 +102,7 @@ from MDAnalysis.analysis.bat import BAT
 
 from .partial_models.independentgaussian import IndependentGaussian
 from .partial_models.multivariategaussian import MultivariateGaussian
-from .partial_models.gaussiankde import IndependentKDE
-from .partial_models.gaussiankde import PrincipalComponentsKDE
+from .partial_models.gaussiankde import IndependentKDE, PrincipalComponentsKDE
 from .partial_models.gaussianmixture import GaussianMixture
 from .partial_models.external import Translational, Rotational
 
@@ -393,12 +392,12 @@ class IndependentBATEnsembleModel(EnsembleModelBase):
             torsion_model='IndependentGaussian', \
             source_model=None, \
             **kwargs):
-        """{0}
+        super(IndependentBATEnsembleModel, self).__init__.__doc__ + """
         torsion_model : str
             The model for shifted torsion coordinates
         source_model : IndependentBATEnsembleModel
             Reuses partial models from the source model
-        """.format(super(IndependentBATEnsembleModel, self).__init__.__doc__)
+        """
         self._torsion_model = torsion_model
         self._source_model = source_model
         super(IndependentBATEnsembleModel, self).__init__(bat, **kwargs)
