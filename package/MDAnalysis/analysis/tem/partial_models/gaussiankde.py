@@ -55,22 +55,22 @@ class IndependentKDE(PartialModelBase):
     the mean value for the degree of freedom.
 
     """
-    def __init__(self, X, coordinate_type, nbins=250):
+
+    _param_keys = ['coordinate_type', 'X', 'nbins']
+    _allowed_coordinate_types = ['bond', 'angle', 'torsion', 'angle_torsion']
+
+    def __init__(self, coordinate_type, X, nbins=250):
         """Parameters
         ----------
+        coordinate_type : str
+            the type of coordinate
         X : numpy.ndarray
             an array of coordinates with dimensions (N, K), where N is the
             number of samples and K is the number of degrees of freedom
-        coordinate_type : str
-            "bond" or "angle" or "torsion" or "translation"
         nbins : int
-            The number of bins to use in discretizing each degree of freedom.
+            The number of bins to use in discretizing each degree of freedom
         """
-        if not coordinate_type in ['bond', 'angle', 'torsion', 'translation']:
-            raise ValueError('error: coordinate_type must be ' + \
-                             '"bond", "angle", "torsion", or "translation"')
-        self._coordinate_type = coordinate_type
-        self._nbins = nbins
+        super(IndependentKDE, self).__init__(coordinate_type)
 
         # Initiate kernel density estimate instances
         self.K = X.shape[1]
@@ -104,16 +104,25 @@ class IndependentKDE(PartialModelBase):
         # Calculate the log normalizing constant, including the Jacobian factor
         if coordinate_type == 'bond':
             # For the bond length, $b$, the Jacobian is $b^2$.
-            self.lnZ_J = 2 * np.sum(np.log(np.mean(X, 0)))
+            lnZ_J = 2 * np.sum(np.log(np.mean(X, 0)))
         elif coordinate_type == 'angle':
             # For the bond angle, $\theta$, the Jacobian is $sin(\theta)$
-            self.lnZ_J = 2 * np.sum(np.log(np.sin(np.mean(X, 0))))
+            lnZ_J = 2 * np.sum(np.log(np.sin(np.mean(X, 0))))
+        elif coordinate_type == 'angle_torsion':
+            # For the bond angle, $\theta$, the Jacobian is $sin(\theta)$
+            # The first half of the coordinates are angles and the rest torsions
+            lnZ_J = 2 * np.sum(np.log(np.sin(means[:X.shape[1]/2])))
         elif (coordinate_type == 'torsion') or \
              (coordinate_type == 'translation'):
             # For torsions, the Jacobian is unity
-            self.lnZ_J = 0.
+            lnZ_J = 0.
         # The log normalizing constant is zero because the kde is normalized
-        self.lnZ = 0.
+        lnZ = 0.
+
+        self._X = X
+        self._nbins = nbins
+        self.lnZ = lnZ
+        self.lnZ_J = lnZ_J
 
     def rvs(self, N, discretize=True):
         if discretize:
@@ -137,37 +146,66 @@ class PrincipalComponentsKDE(IndependentKDE):
     """Models a subset of the degrees of freedom with kernel density estimates on PCA
 
     """
-    def __init__(self, X, coordinate_type, discretize=True, nbins=1000, **kwargs):
-        # Performs principal components analysis
-        X_mean = np.mean(X, 0)
-        X_c = X - X_mean
-        cov = shrinkage_covariance_estimator(X_c)
-        [w, v] = np.linalg.eig(cov)
-        X_pca = np.dot(X_c, v)
-        self._pca = {'mean': X_mean, 'eigenvalues': w, 'eigenvectors': v}
 
-        # Use X_pca to initiate IndependentKDE instance
-        super(PrincipalComponentsKDE, self).__init__(X_pca, coordinate_type, **kwargs)
+    _param_keys = ['coordinate_type', 'X_pca', \
+        'means', 'eigenvalues', 'eigenvectors', 'nbins']
+    _allowed_coordinate_types = ['bond', 'angle', 'torsion', 'angle_torsion', \
+        'translation']
+
+    def __init__(self, coordinate_type, X_pca, \
+                means, eigenvalues, eigenvectors, nbins=1000):
+        # Use self.X_pca to initiate IndependentKDE instance
+        super(PrincipalComponentsKDE, self).__init__(\
+            coordinate_type, X_pca, nbins)
 
         # Correct log normalizing constants with original mean values
         if coordinate_type == 'bond':
             # For the bond length, $b$, the Jacobian is $b^2$.
-            self.lnZ_J = 2 * np.sum(np.log(X_mean))
+            lnZ_J = 2 * np.sum(np.log(means))
         elif coordinate_type == 'angle':
             # For the bond angle, $\theta$, the Jacobian is $sin(\theta)$
-            self.lnZ_J = 2 * np.sum(np.log(np.sin(X_mean)))
+            lnZ_J = 2 * np.sum(np.log(np.sin(means)))
         elif (coordinate_type == 'torsion') or \
              (coordinate_type == 'translation'):
             # For torsions, the Jacobian is unity
-            self.lnZ_J = 0.
+            lnZ_J = 0.
         # The log normalizing constant is zero because the kde is normalized
-        self.lnZ = 0.
+        lnZ = 0.
 
-    def rvs(self, N, **kwargs):
-        X_pca = super(PrincipalComponentsKDE, self).rvs(N, **kwargs)
-        return np.dot(X_pca, self._pca['eigenvectors']) + self._pca['mean']
+        if (coordinate_type == 'translation'):
+            # Log volume of the binding site
+            box = [(self._edges[dim][-1] - self._edges[dim][0]) \
+                for dim in range(3)]
+            self.lnV_site = np.sum(np.log(box))
+            # Standard state correction for confining the system into a box
+            # The standard state volume for a single molecule
+            # in a box of size 1 L is 1.66053928 nanometers**3
+            self.DeltaG_xi = -self.lnV_site + np.log(1660.53928)
 
-    def logpdf(self, X, **kwargs):
-        X_c = X - self._pca['mean']
-        X_pca = np.dot(X_c, self._pca['eigenvectors'])
-        return super(PrincipalComponentsKDE, self).logpdf(X_pca, **kwargs)
+        self._X_pca = X_pca
+        self._means = means
+        self._eigenvalues = eigenvalues
+        self._eigenvectors = eigenvectors
+        self._nbins = nbins
+        self.lnZ = lnZ
+        self.lnZ_J = lnZ_J
+
+    @classmethod
+    def from_data(cls, coordinate_type, X, nbins=1000):
+        # Performs principal components analysis
+        means = np.mean(X, 0)
+        X_c = X - means
+        cov = shrinkage_covariance_estimator(X_c)
+        [eigenvalues, eigenvectors] = np.linalg.eig(cov)
+        X_pca = np.dot(X_c, eigenvectors)
+        return cls(coordinate_type, X_pca, \
+            means, eigenvalues, eigenvectors, nbins)
+
+    def rvs(self, N, discretize=True):
+        X_pca = super(PrincipalComponentsKDE, self).rvs(N, discretize)
+        return np.dot(X_pca, self._eigenvectors) + self._means
+
+    def logpdf(self, X, discretize=True):
+        X_c = X - self._means
+        X_pca = np.dot(X_c, self._eigenvectors)
+        return super(PrincipalComponentsKDE, self).logpdf(X_pca, discretize)

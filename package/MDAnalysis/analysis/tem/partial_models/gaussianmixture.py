@@ -53,23 +53,62 @@ class GaussianMixture(PartialModelBase):
     mean value for the degree of freedom.
 
     """
-    def __init__(self, X, coordinate_type, fraction_train=0.8):
+
+    _param_keys = ['coordinate_type', 'means', 'gmm']
+    _allowed_coordinate_types = ['bond', 'angle', 'torsion', 'angle_torsion']
+
+    def __init__(self, coordinate_type, means, gmm):
         """Parameters
         ----------
+        coordinate_type : str
+            the type of coordinate
+        means : numpy.ndarray
+            the mean value of each coordinate,
+            an array with dimensions (K,)
+        gmm : sklearn.mixture.GaussianMixture
+            represents desired distribution for the coordinates
+        """
+        super(GaussianMixture, self).__init__(coordinate_type)
+
+        K = len(means)
+
+        # Calculate the log normalizing constant, including the Jacobian factor
+        if coordinate_type == 'bond':
+            # For the bond length, $b$, the Jacobian is $b^2$.
+            lnZ_J = 2 * np.sum(np.log(means))
+        elif coordinate_type == 'angle':
+            # For the bond angle, $\theta$, the Jacobian is $sin(\theta)$
+            lnZ_J = 2 * np.sum(np.log(np.sin(means)))
+        elif coordinate_type == 'angle_torsion':
+            # For the bond angle, $\theta$, the Jacobian is $sin(\theta)$
+            # The first half of the coordinates are angles and the rest torsions
+            lnZ_J = 2 * np.sum(np.log(np.sin(means[:K/2])))
+        elif coordinate_type == 'torsion':
+            # For torsions, the Jacobian is unity
+            lnZ_J = 0.
+
+        self._means = means
+        self._gmm = gmm
+        # In scikit-learn, the log probabilities
+        # of the Gaussian mixture are normalized
+        # https://github.com/scikit-learn/scikit-learn/blob/95d4f0841d57e8b5f6b2a570312e9d832e69debc/sklearn/mixture/_gaussian_mixture.py#L380
+        self.lnZ = 0.
+        self.lnZ_J = lnZ_J
+
+    @classmethod
+    def from_data(cls, coordinate_type, X, fraction_train=0.8):
+        """Parameters
+        ----------
+        coordinate_type : str
+            "bond" or "angle" or "torsion"
         X : numpy.ndarray
             an array of coordinates with dimensions (N, K), where N is the
             number of samples and K is the number of degrees of freedom
-        coordinate_type : str
-            "bond" or "angle" or "torsion"
         fraction_train : float
             fraction of the samples used to train versus test the mixture model
         """
-        if not coordinate_type in ['bond', 'angle', 'torsion']:
-            raise ValueError('error: coordinate_type must be ' + \
-                             '"bond", "angle", or "torsion"')
-        self.coordinate_type = coordinate_type
+        means = np.mean(X, 0)
 
-        # Determine parameters
         # Split data into training and testing sets
         n_train = int(X.shape[0]*fraction_train)
         inds = np.random.permutation(X.shape[0])
@@ -92,25 +131,35 @@ class GaussianMixture(PartialModelBase):
           gmm = gmm_n
           n_components += 1
 
-        self._gmm = gmm
-        self._scores = scores
-        self.K = X.shape[1]
+        return cls(coordinate_type, means, gmm)
 
-        # Calculate the log normalizing constant, including the Jacobian factor
-        if coordinate_type == 'bond':
-            # For the bond length, $b$, the Jacobian is $b^2$.
-            self.lnZ_J = 2 * np.sum(np.log(means))
-        elif coordinate_type == 'angle':
-            # For the bond angle, $\theta$, the Jacobian is $sin(\theta)$
-            self.lnZ_J = 2 * np.sum(np.log(np.sin(means)))
-        elif coordinate_type == 'torsion':
-            # For torsions, the Jacobian is unity
-            self.lnZ_J = 0.
+    @classmethod
+    def from_dict(cls, param_dict):
+        """Parameters
+        ----------
+        param_dict : dict
+            a dictionary of parameters needed to reinitialize the model
+        """
+        gmm = mixture.GaussianMixture(**param_dict['params'])
+        for key in param_dict['fit'].keys():
+            setattr(gmm, key, param_dict['fit'][key])
+        return cls(param_dict['coordinate_type'], param_dict['means'], gmm)
 
-        # In scikit-learn, the log probabilities
-        # of the Gaussian mixture are normalized
-        # https://github.com/scikit-learn/scikit-learn/blob/95d4f0841d57e8b5f6b2a570312e9d832e69debc/sklearn/mixture/_gaussian_mixture.py#L380
-        self.lnZ = 0.
+    def to_dict(self):
+        """Return a dictionary of parameters needed to reinitialize the model
+
+        Returns
+        -------
+        param_dict : dict
+            a dictionary of parameters needed to initialize a partial model.
+        """
+        gmm_params = self._gmm.get_params()
+        gmm_fit = dict([(v, getattr(self._gmm, v)) for v in vars(self._gmm) \
+            if v.endswith("_") and not v.startswith("__")])
+        return {'class':repr(getattr(self, '__class__')), \
+            'coordinate_type':self.coordinate_type, \
+            'means':self._means, \
+            'params':gmm_params, 'fit':gmm_fit}
 
     def rvs(self, N):
         return self._gmm.sample(N)[0]

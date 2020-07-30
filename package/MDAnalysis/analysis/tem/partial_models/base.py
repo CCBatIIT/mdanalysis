@@ -42,14 +42,56 @@ class PartialModelBase:
     """Models a subset of the degrees of freedom
 
     """
-    def __init__(self, X):
+    # These variables should be defined in derivative classes
+    _param_keys = [None]
+    _allowed_coordinate_types = ['bond', 'angle', 'torsion', 'angle_torsion', \
+        'translation', 'rotation']
+
+    def __init__(self, coordinate_type):
+        if not coordinate_type in self._allowed_coordinate_types:
+            raise ValueError(f'error: coordinate_type of {coordinate_type} ' + \
+                'is not ' + \
+                ', '.join([repr(c) for c in self._allowed_coordinate_types]))
+        self.coordinate_type = coordinate_type
+
+    @classmethod
+    def from_data(cls, coordinate_type, X, **kwargs):
         """Parameters
         ----------
         X : numpy.ndarray
             an array of coordinates with dimensions (N, K), where N is the
             number of samples and K is the number of degrees of freedom
         """
-        self.lnZ = None
+        return cls(coordinate_type, X, **kwargs)
+
+    @classmethod
+    def from_dict(cls, param_dict):
+        """Parameters
+        ----------
+        param_dict : dict
+            a dictionary of parameters needed to reinitialize the model
+        """
+        for key in cls._param_keys:
+            if not key in param_dict.keys():
+                raise ValueError(f'Parameter dictionary missing {key}')
+        return cls(**{ key:value for (key,value) in param_dict.items() \
+            if key in cls._param_keys })
+
+    def to_dict(self):
+        """Return a dictionary of parameters needed to reinitialize the model
+
+        Returns
+        -------
+        param_dict : dict
+            a dictionary of parameters needed to initialize a partial model.
+        """
+        param_dict = {'class':repr(getattr(self, '__class__'))}
+        for key in self._param_keys:
+            if hasattr(self, key):
+                param_dict[key] = getattr(self, key)
+            elif hasattr(self, '_' + key):
+                param_dict[key] = getattr(self, '_' + key)
+        return param_dict
 
     def rvs(self, N):
         """Generate random samples

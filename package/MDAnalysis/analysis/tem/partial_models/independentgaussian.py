@@ -39,7 +39,6 @@ tau = 2 * np.pi
 
 from .base import PartialModelBase
 
-
 class IndependentGaussian(PartialModelBase):
     """Models a subset of the degrees of freedom as independent Gaussians
 
@@ -55,44 +54,76 @@ class IndependentGaussian(PartialModelBase):
     the mean value for the degree of freedom.
 
     """
-    def __init__(self, X, coordinate_type, std_cutoff=0.01):
+
+    _param_keys = ['coordinate_type', 'means', 'stdevs', 'std_cutoff']
+    _allowed_coordinate_types = ['bond', 'angle', 'torsion', 'angle_torsion']
+
+    def __init__(self, coordinate_type, means, stdevs, std_cutoff=0.01):
         """Parameters
         ----------
-        X : numpy.ndarray
-            an array of coordinates with dimensions (N, K), where N is the
-            number of samples and K is the number of degrees of freedom
         coordinate_type : str
-            "bond" or "angle" or "torsion"
+            the type of coordinate
+        means : numpy.ndarray
+            the mean value of each coordinate,
+            an array with dimensions (K,)
+        stdevs : numpy.ndarray
+            the standard deviation of each coordinate,
+            an array with dimensions (K,)
+        std_cutoff : float
+            the minimum standard deviation for a coordinate
+            to be considered a degree of freedom in the model
         """
-        if not coordinate_type in ['bond', 'angle', 'torsion']:
-            raise ValueError('error: coordinate_type must be ' + \
-                             '"bond", "angle", or "torsion"')
-        self.coordinate_type = coordinate_type
-        self._std_cutoff = std_cutoff
-
-        # Determine parameters
-        self._means = np.mean(X, 0)
-        self._stdevs = np.std(X, 0)
+        super(IndependentGaussian, self).__init__(coordinate_type)
 
         # The degrees of freedom have a standard deviation above the cutoff
-        self._is_dof = self._stdevs>self._std_cutoff
-        self.K = np.sum(self._is_dof)
+        is_dof = (stdevs > std_cutoff)
+        K = np.sum(is_dof)
 
         # Calculate the log normalizing constant, including the Jacobian factor
-        if self.coordinate_type == 'bond':
+        if coordinate_type == 'bond':
             # For the bond length, $b$, the Jacobian is $b^2$.
-            self.lnZ_J = 2 * np.sum(np.log(self._means))
-        elif self.coordinate_type == 'angle':
+            lnZ_J = 2 * np.sum(np.log(means))
+        elif coordinate_type == 'angle':
             # For the bond angle, $\theta$, the Jacobian is $sin(\theta)$
-            self.lnZ_J = 2 * np.sum(np.log(np.sin(self._means)))
-        elif self.coordinate_type == 'torsion':
+            lnZ_J = 2 * np.sum(np.log(np.sin(means)))
+        elif coordinate_type == 'angle_torsion':
+            # For the bond angle, $\theta$, the Jacobian is $sin(\theta)$
+            # The first half of the coordinates are angles and the rest torsions
+            lnZ_J = 2 * np.sum(np.log(np.sin(means[:len(means)/2])))
+        elif coordinate_type == 'torsion':
             # For torsions, the Jacobian is unity
-            self.lnZ_J = 0.
+            lnZ_J = 0.
         # For a Gaussian distribution,
         # $Z = \sqrt{2 \pi} \sigma$
         # $\ln(Z) = 1/2 \ln (2 \pi} + \ln (\sigma)$
-        self.lnZ = np.log(tau) * self.K / 2. + \
-            np.sum(np.log(self._stdevs[self._is_dof]))
+        lnZ = np.log(tau) * K / 2. + \
+            np.sum(np.log(stdevs[is_dof]))
+
+        self._means = means
+        self._stdevs = stdevs
+        self._std_cutoff = std_cutoff
+        self._is_dof = is_dof
+        self.K = K
+        self.lnZ = lnZ
+        self.lnZ_J = lnZ_J
+
+    @classmethod
+    def from_data(cls, coordinate_type, X, std_cutoff=0.01):
+        """Parameters
+        ----------
+        coordinate_type : str
+            the type of coordinate
+        X : numpy.ndarray
+            an array of coordinates with dimensions (N, K), where N is the
+            number of samples and K is the number of degrees of freedom
+        std_cutoff : float
+            the minimum standard deviation for a coordinate
+            to be considered a degree of freedom in the model
+        """
+        # Determine parameters
+        means = np.mean(X, 0)
+        stdevs = np.std(X, 0)
+        return cls(coordinate_type, means, stdevs, std_cutoff)
 
     def rvs(self, N):
         X = np.zeros((N,self._means.shape[0]))

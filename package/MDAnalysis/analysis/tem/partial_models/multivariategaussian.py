@@ -50,39 +50,43 @@ class MultivariateGaussian(PartialModelBase):
     as a constant, based on the mean value for the degree of freedom.
 
     """
-    def __init__(self, X, coordinate_type):
+
+    _param_keys = ['coordinate_type', 'means', 'cov']
+    _allowed_coordinate_types = ['bond', 'angle', 'torsion', 'angle_torsion']
+
+    def __init__(self, coordinate_type, means, cov):
         """Parameters
         ----------
-        X : numpy.ndarray
-            an array of coordinates with dimensions (N, K), where N is the
-            number of samples and K is the number of degrees of freedom
         coordinate_type : str
-            "bond" or "angle" or "torsion"
+            the type of coordinate
+        means : numpy.ndarray
+            the mean value of each coordinate, an array with dimensions (K,)
+        cov : numpy.ndarray
+            the covariance matrix, an array with dimensions (K, K)
         """
-        if not coordinate_type in ['bond', 'angle', 'torsion']:
-            raise ValueError('error: coordinate_type must be ' + \
-                             '"bond", "angle", or "torsion"')
-        self.coordinate_type = coordinate_type
+        super(MultivariateGaussian, self).__init__(coordinate_type)
 
         # Determine parameters
-        means = np.mean(X, 0)
-        cov = shrinkage_covariance_estimator(X)
-        self._mvn = multivariate_normal(means, cov)
-        self.K = X.shape[1]
+        mvn = multivariate_normal(means, cov)
+        K = len(means)
 
         # Calculate the log normalizing constant, including the Jacobian factor
         if coordinate_type == 'bond':
             # For the bond length, $b$, the Jacobian is $b^2$.
-            self.lnZ_J = 2 * np.sum(np.log(means))
+            lnZ_J = 2 * np.sum(np.log(means))
         elif coordinate_type == 'angle':
             # For the bond angle, $\theta$, the Jacobian is $sin(\theta)$
-            self.lnZ_J = 2 * np.sum(np.log(np.sin(means)))
+            lnZ_J = 2 * np.sum(np.log(np.sin(means)))
+        elif coordinate_type == 'angle_torsion':
+            # For the bond angle, $\theta$, the Jacobian is $sin(\theta)$
+            # The first half of the coordinates are angles and the rest torsions
+            lnZ_J = 2 * np.sum(np.log(np.sin(means[:len(means)/2])))
         elif coordinate_type == 'torsion':
             # For torsions, the Jacobian is unity
-            self.lnZ_J = 0.
+            lnZ_J = 0.
 
         # Logpdf results are normalized
-        self.lnZ = 0.
+        lnZ = 0.
         # For a multivariate Gaussian distribution,
         # Z = (2 \pi)^(K/2) |\Sigma|^{1/2}
         # ln Z = K/2 \ln (2 \pi) + 1/2 \ln (|\Sigma|)
@@ -92,6 +96,28 @@ class MultivariateGaussian(PartialModelBase):
         # else:
         #     raise ValueError('The sign on the determinant of the covariance' + \
         #                      'matrix is not one.')
+
+        self._means = means
+        self._cov = cov
+        self._mvn = mvn
+        self.K = K
+        self.lnZ = lnZ
+        self.lnZ_J = lnZ_J
+
+    @classmethod
+    def from_data(cls, coordinate_type, X):
+        """Parameters
+        ----------
+        coordinate_type : str
+            the type of coordinate
+        X : numpy.ndarray
+            an array of coordinates with dimensions (N, K), where N is the
+            number of samples and K is the number of degrees of freedom
+        """
+        # Determine parameters
+        means = np.mean(X, 0)
+        cov = shrinkage_covariance_estimator(X)
+        return cls(coordinate_type, means, cov)
 
     def rvs(self, N):
         return self._mvn.rvs(N)

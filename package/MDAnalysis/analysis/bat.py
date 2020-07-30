@@ -309,38 +309,43 @@ class BAT(AnalysisBase):
         if len(self._ag.fragments) > 1:
             raise ValueError('AtomGroup has more than one molecule')
 
+        if filename is not None:
+            self.load(filename)
+
         # Determine the root
-        # The initial atom must be a terminal atom
-        terminal_atoms = _sort_atoms_by_mass(\
-            [a for a in self._ag.atoms if len(a.bonds)==1], reverse=True)
-        if (initial_atom is None):
-            # Select the heaviest root atoms from the heaviest terminal atom
-            initial_atom = terminal_atoms[0]
-        elif (not initial_atom in terminal_atoms):
-            raise ValueError('Initial atom is not a terminal atom')
-        # The next atom in the root is bonded to the initial atom
-        # Since the initial atom is a terminal atom, there is only
-        # one bonded atom
-        second_atom = initial_atom.bonded_atoms[0]
-        # The last atom in the root is the heaviest atom
-        # bonded to the second atom
-        # If there are more than three atoms,
-        # then the last atom cannot be a terminal atom.
-        if self._ag.n_atoms != 3:
-            third_atom = _sort_atoms_by_mass(\
-                [a for a in second_atom.bonded_atoms \
-                if (a in self._ag) and (a!=initial_atom) \
-                and (a not in terminal_atoms)], \
-                reverse=True)[0]
-        else:
-            third_atom = _sort_atoms_by_mass(\
-                [a for a in second_atom.bonded_atoms \
-                if (a in self._ag) and (a!=initial_atom)], \
-                reverse=True)[0]
-        self._root = mda.AtomGroup([initial_atom, second_atom, third_atom])
+        if not hasattr(self, '_root'):
+          # The initial atom must be a terminal atom
+          terminal_atoms = _sort_atoms_by_mass(\
+              [a for a in self._ag.atoms if len(a.bonds)==1], reverse=True)
+          if (initial_atom is None):
+              # Select the heaviest root atoms from the heaviest terminal atom
+              initial_atom = terminal_atoms[0]
+          elif (not initial_atom in terminal_atoms):
+              raise ValueError('Initial atom is not a terminal atom')
+          # The next atom in the root is bonded to the initial atom
+          # Since the initial atom is a terminal atom, there is only
+          # one bonded atom
+          second_atom = initial_atom.bonded_atoms[0]
+          # The last atom in the root is the heaviest atom
+          # bonded to the second atom
+          # If there are more than three atoms,
+          # then the last atom cannot be a terminal atom.
+          if self._ag.n_atoms != 3:
+              third_atom = _sort_atoms_by_mass(\
+                  [a for a in second_atom.bonded_atoms \
+                  if (a in self._ag) and (a!=initial_atom) \
+                  and (a not in terminal_atoms)], \
+                  reverse=True)[0]
+          else:
+              third_atom = _sort_atoms_by_mass(\
+                  [a for a in second_atom.bonded_atoms \
+                  if (a in self._ag) and (a!=initial_atom)], \
+                  reverse=True)[0]
+          self._root = mda.AtomGroup([initial_atom, second_atom, third_atom])
 
         # Construct a list of torsion angles
-        self._torsions = _find_torsions(self._root, self._ag)
+        if not hasattr(self, '_torsions'):
+            self._torsions = _find_torsions(self._root, self._ag)
 
         # Get indices of the root and torsion atoms
         # in a Cartesian positions array that matches the AtomGroup
@@ -361,9 +366,6 @@ class BAT(AnalysisBase):
         self._ag2 = mda.AtomGroup([ag[1] for ag in self._torsions])
         self._ag3 = mda.AtomGroup([ag[2] for ag in self._torsions])
         self._ag4 = mda.AtomGroup([ag[3] for ag in self._torsions])
-
-        if filename is not None:
-            self.load(filename)
 
     def _prepare(self):
         self.bat = np.zeros((self.n_frames, 3*self._ag.n_atoms), \
@@ -427,29 +429,49 @@ class BAT(AnalysisBase):
         self.bat[self._frame_index,:] = \
             np.concatenate((root_based, bonds, angles, torsions))
 
-    def load(self, filename, start=None, stop=None, step=None):
-        """Loads the bat trajectory from a file in numpy binary format
+    def load(self, filename, start=None, stop=None, step=None, check_traj=True):
+        """Loads information from a file in numpy or netcdf binary format
+
+        A numpy file will only contain the trajectory. A netcdf file also
+        contains root and torsion atom indices. The file format is determined
+        by the extension.
 
         Parameters
         ----------
         filename : str
-            name of numpy binary file
+            name of numpy or netcdf binary file
         start : int, optional
             start frame of analysis
         stop : int, optional
             stop frame of analysis
         step : int, optional
             number of frames to skip between each analysed frame
+        check_traj : bool, optional
+            check whether the original and bat trajectories are consistent.
+            it is helpful to set to False if the original trajectory
+            is unavailable.
 
         See Also
         --------
-        save: Saves the bat trajectory in a file in numpy binary format
+        save: Saves information in numpy or netcdf binary format
         """
+        logger.info("Loading file")
+        if filename.endswith('.npy'):
+            self.bat = np.load(filename)
+        elif filename.endswith('.nc'):
+            from netCDF4 import Dataset
+            nc_F = Dataset(filename, 'r', format="NETCDF4")
+            self._root = self._ag[np.array(nc_F['root_indices'][:])]
+            self._torsions = [self._ag[np.array(t)] \
+                for t in nc_F['torsion_indices'][:]]
+            self.bat = np.array(nc_F['bat'][:])
+            nc_F.close()
+
+        if not check_traj:
+            return self
+
         logger.info("Choosing frames")
         self._setup_frames(self._trajectory, start, stop, step)
-
-        logger.info("Loading file")
-        self.bat = np.load(filename)
 
         # Check array dimensions
         if self.bat.shape!=(self.n_frames, 3*self._ag.n_atoms):
@@ -457,24 +479,55 @@ class BAT(AnalysisBase):
               f'({self.bat.shape[0]},{self.bat.shape[1]}), differ from ' + \
               f'required dimensions of ({self.n_frames, 3*self._ag.n_atoms})')
         # Check position of initial atom
-        for i, ts in enumerate(self._trajectory[self.start:self.stop:self.step]):
-            self._frame_index = i
-            self._ts = ts
-            self.frames[i] = ts.frame
-            self.times[i] = ts.time
-            if (self.bat[i,:3] != self._root[0].position).any():
-                raise ValueError('Position of initial atom in file ' + \
-                    'inconsistent with current trajectory.')
+        if hasattr(self, '_root'):
+            for i, ts in enumerate(\
+                    self._trajectory[self.start:self.stop:self.step]):
+                self._frame_index = i
+                self._ts = ts
+                self.frames[i] = ts.frame
+                self.times[i] = ts.time
+                if (self.bat[i,:3] != self._root[0].position).any():
+                    raise ValueError('Position of initial atom in file ' + \
+                        'inconsistent with current trajectory.')
         return self
 
     def save(self, filename):
-        """Saves the bat trajectory in a file in numpy binary format
+        """Saves information in numpy or netcdf binary format
+
+        A numpy file will only contain the trajectory. A netcdf file also
+        contains root and torsion atom indices. The file format is determined
+        by the extension.
 
         See Also
         --------
-        load: Loads the bat trajectory from a file in numpy binary format
+        load: loads information from a file in numpy or netcdf binary format
         """
-        np.save(filename, self.bat)
+        if filename.endswith('.npy'):
+            np.save(filename, self.bat)
+        elif filename.endswith('.nc'):
+            from netCDF4 import Dataset
+            nc_F = Dataset(filename, 'w', format="NETCDF4")
+
+            nc_F.createDimension("one", 1)
+            nc_F.createDimension("root_dofs", 3)
+            nc_F.createDimension("torsion_dofs", 4)
+            nc_F.createDimension("ntorsions", len(self._torsions))
+            nc_F.createDimension("nframes", self.bat.shape[0])
+            nc_F.createDimension("nbat", self.bat.shape[1])
+
+            nc_F.createVariable("root_indices", 'i4', ("root_dofs","one"))
+            nc_F.createVariable("torsion_indices", 'i4', \
+                ("ntorsions","torsion_dofs"))
+            nc_F.createVariable("bat", 'f4', ("nframes","nbat"))
+
+            nc_F['root_indices'][:] = self._root.indices
+            nc_F['torsion_indices'][:] = \
+                np.array([t.indices for t in self._torsions])
+            nc_F['bat'][:] = self.bat
+
+            nc_F.close()
+        else:
+            raise ValueError('File type not supported')
 
     def Cartesian(self, bat):
         """Conversion of a single frame from BAT to Cartesian coordinates

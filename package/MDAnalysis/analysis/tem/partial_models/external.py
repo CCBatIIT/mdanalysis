@@ -53,6 +53,8 @@ from scipy.stats import rv_discrete
 from .base import PartialModelBase
 from .gaussiankde import PrincipalComponentsKDE
 
+from MDAnalysis.analysis.encore.covariance import shrinkage_covariance_estimator
+
 class Translational(PrincipalComponentsKDE):
     """Models translational degrees of freedom
 
@@ -60,23 +62,8 @@ class Translational(PrincipalComponentsKDE):
     principal components projection. The procedure is described in [Menzer2018]_.
 
     """
-    def __init__(self, X):
-        """Parameters
-        ----------
-        X : numpy.ndarray
-            The translational degrees of freedom.
-            An array with dimensions (N, 3), where N is the number of samples.
-        """
-        super(Translational, self).__init__(X, coordinate_type='translation')
-
-        # Log volume of the binding site
-        box = [(self._edges[dim][-1] - self._edges[dim][0]) \
-            for dim in range(3)]
-        self.lnV_site = np.sum([np.log(box) for dim in range(3)])
-        # Standard state correction for confining the system into a box
-        # The standard state volume for a single molecule
-        # in a box of size 1 L is 1.66053928 nanometers**3
-        self.DeltaG_xi = -self.lnV_site + np.log(1660.53928)
+    # _param_keys inherits from PrincipalComponentsKDE
+    _allowed_coordinate_types = ['translation']
 
 class Rotational(PartialModelBase):
     """Models rotational degrees of freedom
@@ -86,48 +73,30 @@ class Rotational(PartialModelBase):
     The procedure is described in [Menzer2018]_.
 
     """
-    def __init__(self, rot, nbins=100):
+    _param_keys = ['rho', 'edges']
+    _allowed_coordinate_types = ['rotation']
+
+    def __init__(self, rho, edges):
         """Parameters
         ----------
-        rot : numpy.ndarray
-            The rotational degrees of freedom.
-            An array with dimensions (N, 3), where N is the number of samples.
-        nbins : int
-            The number of bins in the histogram.
+        rho : numpy.ndarray
+            the normalized density, with (K, nbins) dimensions
+        edges : numpy.ndarray
+            bin edges, with (K, nbins+1) dimensions
         """
-        edges_2pi = np.linspace(-np.pi, np.pi, nbins)
-        edges_pi = np.linspace(0, np.pi, nbins)
+        super(Rotational, self).__init__('rotation')
 
-        scotts_factor = np.power(rot.shape[0], (-1. / 5))
+        delta = [e[1]-e[0] for e in edges]
+        centers = [edges[dim, :-1] + delta[dim] / 2 for dim in range(3)]
 
-        # Define parameters and estimate log partition function
-        self._rv_discrete = []
-        self._edges = []
-        self._centers = []
-        self._delta = []
-
-        self.lnZ = 0
+        rv = []
         for dim in range(3):
             name = {0: 'phi', 1: 'theta', 2: 'omega'}[dim]
-            if dim in [0, 2]:
-                edges = edges_2pi
-            else:
-                edges = edges_pi
-            delta = edges[1] - edges[0]
-            centers = edges[:-1] + delta / 2
+            rv.append(rv_discrete(name=name, \
+                values=(range(rho.shape[1]), rho[dim])))
 
-            H = np.histogram(rot[:, dim], edges, density=True)[0]
-            # Gaussian kernel
-            sigma = scotts_factor * 10. * delta
-            ker = np.exp(-(centers-centers[int(len(centers)/2)])**2/\
-                         2/sigma**2)/sigma/np.sqrt(2*np.pi)
-            # Convolution
-            rho = np.abs(np.fft.fftshift(np.fft.ifft(\
-                         np.fft.fft(H)*np.fft.fft(ker))).real)
-            # For rv_discrete, the sum of probabilities is required to be one
-            rho /= np.sum(rho)
-            # Initiat discretized random variable
-            rv = rv_discrete(name=name, values=(range(len(rho)), rho))
+        lnZ = 0.
+        for dim in range(3):
             # Because a numerical integral is np.sum(rho*delta),
             # probabilities from rv_discrete will be divided by delta
             # so that they are normalized
@@ -137,19 +106,59 @@ class Rotational(PartialModelBase):
             if dim in [0, 2]:
                 # $Z = \sum_i^n_b \rho(x_i) \delta = 1$
                 # \sum_i \delta = n_b \delta = 2 \pi
-                self.lnZ += 0.
+                lnZ += 0.
             else:
                 # The second Euler angle has a Jacobian
                 # $Z = \sum_i^n_b \rho(x_i) sin(x_i) \delta = 1$
                 # \sum_i^n_b sin(x_i) \delta = 2$
-                self.lnZ += np.log(np.sum(np.sin(centers)*rho/delta))
-
+                lnZ += np.log(np.sum(np.sin(centers)*rho[dim]/delta[dim]))
             # There is no lnZ_J because the Jacobian is not assumed to be
             # a constant, but part of the integral over theta
-            self._rv_discrete.append(rv)
-            self._edges.append(edges)
-            self._centers.append(centers)
-            self._delta.append(delta)
+
+        self._rho = rho
+        self._edges = edges
+        self._centers = centers
+        self._delta = delta
+        self._rv_discrete = rv
+        self.lnZ = lnZ
+
+    @classmethod
+    def from_data(cls, rot, nbins=1000):
+        """Parameters
+        ----------
+        rot : numpy.ndarray
+            The rotational degrees of freedom.
+            An array with dimensions (N, 3), where N is the number of samples.
+        """
+        scotts_factor = np.power(rot.shape[0], (-1. / 5))
+
+        # Define parameters and estimate log partition function
+        rho = []
+        edges = []
+        for dim in range(3):
+            if dim in [0, 2]:
+                e = np.linspace(-np.pi, np.pi, nbins)
+            else:
+                e = np.linspace(0, np.pi, nbins)
+            delta = e[1] - e[0]
+            centers = e[:-1] + delta / 2
+
+            H = np.histogram(rot[:, dim], e, density=True)[0]
+            # Gaussian kernel
+            sigma = scotts_factor * 10. * (delta)
+            ker = np.exp(-(centers-centers[int(len(centers)/2)])**2/\
+                         2/sigma**2)/sigma/np.sqrt(2*np.pi)
+            # Convolution
+            r = np.abs(np.fft.fftshift(np.fft.ifft(\
+                         np.fft.fft(H)*np.fft.fft(ker))).real)
+            # For rv_discrete, the sum of probabilities
+            # is required to be one
+            r /= np.sum(r)
+
+            rho.append(r)
+            edges.append(e)
+
+        return cls(np.array(rho), np.array(edges))
 
     def rvs(self, N):
         """Generate random samples
